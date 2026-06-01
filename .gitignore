@@ -1,0 +1,83 @@
+build/
+build-*/
+swiftnet.xcodeproj/
+
+# Benchmark: keep scripts and reference servers; ignore deps, logs, results
+benchmark/node_modules/
+benchmark/results/
+benchmark/springboot/build/
+benchmark/springboot/.gradle/
+
+# Runtime artifacts / logs / generated example assets
+*.log
+public/
+
+# ---------------------------------------------------------------------------
+# CMake / Ninja / Makefile by-products
+# ---------------------------------------------------------------------------
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+*_build/
+.ninja_log
+.ninja_deps
+
+# ---------------------------------------------------------------------------
+# Compiler intermediates
+# ---------------------------------------------------------------------------
+*.o
+*.obj
+*.so
+*.a
+*.dylib
+*.dll
+*.exe
+*.out
+*.pyc
+*.pch
+*.pdb
+*.ilk
+*.dSYM/
+*.gcno
+*.gcda
+
+# ---------------------------------------------------------------------------
+# IDEs / editors
+#   – Xcode, CLion, VS Code, VS, CLangd, QtCreator, etc.
+# ---------------------------------------------------------------------------
+# Xcode user data & derived data
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+.idea/
+# VS Code
+.vscode/
+# CLion
+cmake-build-*/
+.clion/
+# clangd index
+.cache/
+.clangd/
+# QtCreator
+.qtc/
+
+# ---------------------------------------------------------------------------
+# Package-manager and dependency caches
+# ---------------------------------------------------------------------------
+conanbuild/
+conanfile.lock
+vcpkg_installed/
+
+# ---------------------------------------------------------------------------
+# macOS & *nix system cruft
+# ---------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+.Trashes
+ehthumbs.db
+Thumbs.db

@@ -1,0 +1,9 @@
+.git/
+build/
+build-*/
+public/
+*.log
+benchmark/node_modules/
+benchmark/results/
+benchmark/springboot/build/
+benchmark/springboot/.gradle/
