@@ -4,9 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
-#include <map>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -30,8 +29,7 @@ namespace
     }
 
     // Case-insensitive header lookup (HTTP header names are case-insensitive).
-    const std::string *find_header(const std::map<std::string, std::string> &headers,
-                                   std::string_view name)
+    const std::string *find_header(const header_list &headers, std::string_view name)
     {
         for (const auto &[k, v] : headers)
             if (iequals(k, name))
@@ -80,7 +78,8 @@ namespace
 
 // Parse one HTTP/1.1 request (headers + body) from the front of `data`.
 // Returns 1 = complete (req filled, consumed = total bytes), 0 = need more data,
-// -1 = malformed / over limit.
+// -1 = malformed / over limit. Scans with string_view (no istringstream / no
+// header-block copy); headers go into a vector (no per-header tree-node alloc).
 static int parse_request(const std::string &data, request &req, std::size_t &consumed)
 {
     auto pos_end = data.find("\r\n\r\n");
@@ -88,32 +87,35 @@ static int parse_request(const std::string &data, request &req, std::size_t &con
         return data.size() > kMaxHeaderBytes ? -1 : 0; // headers incomplete / too large
     std::size_t header_len = pos_end + 4;
 
-    req.headers.clear();
-    std::istringstream iss(data.substr(0, header_len));
-    std::string line;
-    if (!std::getline(iss, line))
+    std::string_view hv(data.data(), pos_end); // request line + headers, CRLF-separated
+    constexpr auto npos = std::string_view::npos;
+
+    // Request line: METHOD SP PATH SP VERSION
+    std::size_t rl_end = hv.find("\r\n");
+    std::string_view rl = hv.substr(0, rl_end == npos ? hv.size() : rl_end);
+    std::size_t sp1 = rl.find(' ');
+    if (sp1 == npos)
         return -1;
-    if (!line.empty() && line.back() == '\r')
-        line.pop_back();
+    std::size_t sp2 = rl.find(' ', sp1 + 1);
+    req.method.assign(rl.substr(0, sp1));
+    req.path.assign(rl.substr(sp1 + 1, (sp2 == npos ? rl.size() : sp2) - (sp1 + 1)));
+
+    // Header lines.
+    req.headers.clear();
+    std::size_t pos = (rl_end == npos) ? hv.size() : rl_end + 2;
+    while (pos < hv.size())
     {
-        std::istringstream l0(line);
-        if (!(l0 >> req.method >> req.path))
-            return -1;
-    }
-    while (std::getline(iss, line))
-    {
-        if (line == "\r" || line.empty() || line == "\n")
-            break;
-        if (line.back() == '\r')
-            line.pop_back();
-        auto colon = line.find(':');
-        if (colon == std::string::npos)
+        std::size_t le = hv.find("\r\n", pos);
+        std::string_view line = hv.substr(pos, (le == npos ? hv.size() : le) - pos);
+        pos = (le == npos) ? hv.size() : le + 2;
+        std::size_t colon = line.find(':');
+        if (colon == npos)
             continue;
-        std::string key = line.substr(0, colon);
-        std::string value = line.substr(colon + 1);
-        if (!value.empty() && value.front() == ' ')
-            value.erase(0, 1);
-        req.headers[std::move(key)] = std::move(value);
+        std::string_view name = line.substr(0, colon);
+        std::string_view val = line.substr(colon + 1);
+        while (!val.empty() && (val.front() == ' ' || val.front() == '\t'))
+            val.remove_prefix(1);
+        req.headers.emplace_back(std::string(name), std::string(val));
     }
 
     // Body framing: chunked takes precedence over Content-Length.
@@ -147,17 +149,48 @@ static int parse_request(const std::string &data, request &req, std::size_t &con
     return 1;
 }
 
+void swiftnet::http::set_header(header_list &h, std::string_view name, std::string value)
+{
+    for (auto &kv : h)
+        if (iequals(kv.first, name))
+        {
+            kv.second = std::move(value);
+            return;
+        }
+    h.emplace_back(std::string(name), std::move(value));
+}
+
 std::string response::to_string() const
 {
-    std::ostringstream oss;
-    oss << "HTTP/1.1 " << status << " OK\r\n";
-    if (headers.find("Content-Length") == headers.end())
-        oss << "Content-Length: " << body.size() << "\r\n";
+    std::string out;
+    std::size_t hdr_bytes = 0;
     for (const auto &[k, v] : headers)
-        oss << k << ": " << v << "\r\n";
-    oss << "\r\n";
-    oss << body;
-    return oss.str();
+        hdr_bytes += k.size() + v.size() + 4;
+    out.reserve(48 + hdr_bytes + body.size());
+
+    char num[20];
+    out += "HTTP/1.1 ";
+    auto [p, ec] = std::to_chars(num, num + sizeof(num), status);
+    out.append(num, p);
+    out += " OK\r\n";
+
+    if (!find_header(headers, "content-length"))
+    {
+        out += "Content-Length: ";
+        auto [q, e2] = std::to_chars(num, num + sizeof(num), body.size());
+        out.append(num, q);
+        out += "\r\n";
+    }
+    for (const auto &[k, v] : headers)
+    {
+        out += k;
+        out += ": ";
+        out += v;
+        out += "\r\n";
+    }
+    out += "\r\n";
+    out += body;
+    return out;
 }
 
 server::server(uint16_t port, int backlog) : acceptor_(port, backlog)
@@ -258,8 +291,8 @@ vthread server::client_task(net::tcp_socket sock)
             response res;
             res.status = 400;
             res.body = "Bad Request";
-            res.headers["Content-Type"] = "text/plain";
-            res.headers["Connection"] = "close";
+            set_header(res.headers, "Content-Type", "text/plain");
+            set_header(res.headers, "Connection", "close");
             std::string out = res.to_string();
             co_await sock.async_write(out.data(), out.size());
             sock.close();
@@ -318,11 +351,11 @@ vthread server::client_task(net::tcp_socket sock)
             {
                 res.status = 404;
                 res.body = "Not Found";
-                res.headers["Content-Type"] = "text/plain";
+                set_header(res.headers, "Content-Type", "text/plain");
             }
         }
 
-        res.headers["Connection"] = client_keep ? "keep-alive" : "close";
+        set_header(res.headers, "Connection", client_keep ? "keep-alive" : "close");
         std::string out = res.to_string();
         int w = co_await sock.async_write(out.data(), out.size());
 

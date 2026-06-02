@@ -1,0 +1,192 @@
+Sort by top of stack, same collapsed (when >= 5):
+        __semwait_signal  (in libsystem_kernel.dylib)        44586
+        kevent  (in libsystem_kernel.dylib)        5533
+        __psynch_cvwait  (in libsystem_kernel.dylib)        5375
+        write  (in libsystem_kernel.dylib)        2449
+        __psynch_mutexwait  (in libsystem_kernel.dylib)        2178
+        __write_nocancel  (in libsystem_kernel.dylib)        1861
+        read  (in libsystem_kernel.dylib)        1406
+        _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib)        790
+        mach_absolute_time  (in libsystem_kernel.dylib)        771
+        _xzm_free  (in libsystem_malloc.dylib)        602
+        mach_msg2_trap  (in libsystem_kernel.dylib)        422
+        __psynch_mutexdrop  (in libsystem_kernel.dylib)        290
+        nlohmann::json_abi_v3_11_3::detail::serializer<nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>>::dump_escaped(std::basic_string<char> const&, bool)  (in basic_server)        287
+        _platform_memmove  (in libsystem_platform.dylib)        285
+        _platform_memset  (in libsystem_platform.dylib)        186
+        <deduplicated_symbol>  (in libsystem_malloc.dylib)        138
+        _free  (in libsystem_malloc.dylib)        106
+        _xzm_xzone_malloc  (in libsystem_malloc.dylib)        105
+        malloc_type_malloc  (in libsystem_malloc.dylib)        99
+        std::basic_regex<char, std::regex_traits<char>>::__match_at_start_ecma<std::allocator<std::sub_match<char const*>>>(char const*, char const*, std::match_results<char const*>&, std::regex_constants::match_flag_type, bool) const  (in basic_server)        81
+        _platform_memcmp  (in libsystem_platform.dylib)        76
+        std::vector<std::__state<char>>::__swap_out_circular_buffer(std::__split_buffer<std::__state<char>&>&)  (in basic_server)        63
+        operator new(unsigned long)  (in libc++abi.dylib)        60
+        swiftnet::http::server::client_task(swiftnet::net::tcp_socket) (.resume)  (in basic_server)        57
+        std::__tree<std::__value_type<std::basic_string<char>, nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>>, std::__map_value_compare<std::basic_string<char>, std::pair<std::basic_string<char> const, nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>>, true>>::__emplace_unique_key_args<std::basic_string<char>, std::basic_string<char>, std::nullptr_t>(std::basic_string<char> const&, std::basic_string<char>&&, std::nullptr_t&&)  (in basic_server)        55
+        mach_continuous_time  (in libsystem_kernel.dylib)        50
+        std::basic_streambuf<char>::xsputn(char const*, long)  (in libc++.1.dylib)        50
+        nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>::json_value::destroy(nlohmann::json_abi_v3_11_3::detail::value_t)  (in basic_server)        45
+        std::locale::use_facet(std::locale::id&) const  (in libc++.1.dylib)        45
+        <deduplicated_symbol>  (in basic_server)        42
+        pthread_mutex_lock  (in libsystem_pthread.dylib)        39
+        std::basic_stringbuf<char>::__init_buf_ptrs[abi:nqe210106]()  (in basic_server)        37
+        std::__hash_table<std::__hash_value_type<std::basic_string<char>, std::basic_string<char>>>::__emplace_unique_key_args<std::basic_string<char>, std::piecewise_construct_t const&, std::tuple<std::basic_string<char> const&>, std::tuple<>>(std::basic_string<char> const&, std::piecewise_construct_t const&, std::tuple<std::basic_string<char> const&>&&, std::tuple<>&&)  (in basic_server)        35
+        std::basic_string<char>::push_back(char)  (in libc++.1.dylib)        35
+        _platform_strlen  (in libsystem_platform.dylib)        34
+        DYLD-STUB$$free  (in libc++abi.dylib)        31
+        std::__put_character_sequence[abi:nqe210106]<char>(std::basic_ostream<char>&, char const*, unsigned long)  (in basic_server)        31
+        std::__state<char>* std::vector<std::__state<char>>::__emplace_back_slow_path<std::__state<char>>(std::__state<char>&&)  (in basic_server)        31
+        std::basic_string<char>::append(char const*, unsigned long)  (in libc++.1.dylib)        31
+        spdlog::details::full_formatter::format(spdlog::details::log_msg const&, tm const&, fmt::v11::basic_memory_buffer<char, 250ul, fmt::v11::detail::allocator<char>>&)  (in basic_server)        29
+        nlohmann::json_abi_v3_11_3::detail::serializer<nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>>::dump(nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void> const&, bool, bool, unsigned int, unsigned int)  (in basic_server)        28
+        std::__itoa::__base_10_u32[abi:nqe210106](char*, unsigned int)  (in libc++.1.dylib)        28
+        std::__pad_and_output[abi:nqe210106]<char>(std::ostreambuf_iterator<char>, char const*, char const*, char const*, std::ios_base&, char)  (in basic_server)        28
+        std::locale::locale()  (in libc++.1.dylib)        28
+        std::vector<std::function<void (swiftnet::Request&, swiftnet::Response&, std::function<void ()>)>>::__swap_out_circular_buffer(std::__split_buffer<std::function<void (swiftnet::Request&, swiftnet::Response&, std::function<void ()>)>&>&, std::function<void (swiftnet::Request&, swiftnet::Response&, std::function<void ()>)>*)  (in basic_server)        26
+        DYLD-STUB$$malloc_type_malloc  (in libc++abi.dylib)        25
+        std::basic_string<char>::__grow_by(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long)  (in libc++.1.dylib)        25
+        DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib)        23
+        <deduplicated_symbol>  (in libc++.1.dylib)        22
+        DYLD-STUB$$operator new(unsigned long)  (in basic_server)        22
+        __bzero  (in libsystem_platform.dylib)        22
+        operator delete(void*)  (in libc++abi.dylib)        22
+        std::__bracket_expression<char, std::regex_traits<char>>::__exec(std::__state<char>&) const  (in basic_server)        21
+        std::__function::__func<swiftnet::SwiftNet::logger()::$_0, void (swiftnet::Request&, swiftnet::Response&, std::function<void ()>)>::operator()(swiftnet::Request&, swiftnet::Response&, std::function<void ()>&&)  (in basic_server)        21
+        std::__hash_table<std::__hash_value_type<void*, swiftnet::vthread_scheduler::IoOp>>::__emplace_unique_key_args<void*, std::piecewise_construct_t const&, std::tuple<void*&&>, std::tuple<>>(void* const&, std::piecewise_construct_t const&, std::tuple<void*&&>&&, std::tuple<>&&)  (in basic_server)        21
+        DYLD-STUB$$memmove  (in libc++.1.dylib)        20
+        nanosleep  (in libsystem_c.dylib)        20
+        DYLD-STUB$$operator delete(void*)  (in libc++abi.dylib)        19
+        swiftnet::http::response::to_string() const  (in basic_server)        19
+        std::basic_ostream<char>::sentry::sentry(std::basic_ostream<char>&)  (in libc++.1.dylib)        18
+        swiftnet::vthread_scheduler::reactor_loop()  (in basic_server)        18
+        DYLD-STUB$$operator delete(void*)  (in basic_server)        17
+        std::__tree<std::__value_type<std::basic_string<char>, std::basic_string<char>>, std::__map_value_compare<std::basic_string<char>, std::pair<std::basic_string<char> const, std::basic_string<char>>, true>>::__emplace_unique_key_args<std::basic_string<char>, std::piecewise_construct_t const&, std::tuple<std::basic_string<char> const&>, std::tuple<>>(std::basic_string<char> const&, std::piecewise_construct_t const&, std::tuple<std::basic_string<char> const&>&&, std::tuple<>&&)  (in basic_server)        17
+        std::basic_ostream<char>::sentry::~sentry()  (in libc++.1.dylib)        17
+        std::__pad_and_output[abi:nqe210106]<char>(std::ostreambuf_iterator<char>, char const*, char const*, char const*, std::ios_base&, char)  (in libc++.1.dylib)        15
+        __sfvwrite  (in libsystem_c.dylib)        14
+        std::__match_char<char>::__exec(std::__state<char>&) const  (in basic_server)        14
+        _pthread_exit_if_canceled  (in libsystem_pthread.dylib)        13
+        pthread_mutex_unlock  (in libsystem_pthread.dylib)        13
+        std::__tree<std::__value_type<std::basic_string<char>, std::basic_string<char>>, std::__map_value_compare<std::basic_string<char>, std::pair<std::basic_string<char> const, std::basic_string<char>>, true>>::__emplace_unique_key_args<std::basic_string<char>, std::piecewise_construct_t const&, std::tuple<std::basic_string<char>&&>, std::tuple<>>(std::basic_string<char> const&, std::piecewise_construct_t const&, std::tuple<std::basic_string<char>&&>&&, std::tuple<>&&)  (in basic_server)        13
+        std::basic_stringbuf<char>::overflow(int)  (in libc++.1.dylib)        13
+        std::num_put<char, std::ostreambuf_iterator<char>>::__do_put_integral[abi:nqe210106]<unsigned long>(std::ostreambuf_iterator<char>, std::ios_base&, char, unsigned long) const  (in libc++.1.dylib)        13
+        std::operator>>[abi:nqe210106]<char>(std::basic_istream<char>&, std::basic_string<char>&)  (in basic_server)        13
+        swiftnet::SwiftNet::make_handler<main::$_4>(main::$_4&&)::'lambda'(swiftnet::Request&, swiftnet::Response&)::operator()(swiftnet::Request&, swiftnet::Response&) const (.resume)  (in basic_server)        13
+        _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib)        12
+        std::__murmur2_or_cityhash<unsigned long, 64ul>::operator()[abi:nqe210106](void const*, unsigned long) const  (in basic_server)        12
+        std::__tree_balance_after_insert[abi:nqe210106]<std::__tree_node_base<void*>*>(std::__tree_node_base<void*>*, std::__tree_node_base<void*>*)  (in basic_server)        12
+        xzm_malloc_zone_try_free_default  (in libsystem_malloc.dylib)        12
+        DYLD-STUB$$std::basic_ostream<char>::sentry::sentry(std::basic_ostream<char>&)  (in basic_server)        11
+        _tlv_get_addr  (in libdyld.dylib)        11
+        std::__function::__func<swiftnet::SwiftNet::run_middlewares(swiftnet::Request&, swiftnet::Response&)::$_0, void ()>::operator()()  (in basic_server)        11
+        std::__tree<std::__value_type<std::basic_string<char>, std::basic_string<char>>, std::__map_value_compare<std::basic_string<char>, std::pair<std::basic_string<char> const, std::basic_string<char>>, true>>::destroy(std::__tree_node<std::__value_type<std::basic_string<char>, std::basic_string<char>>, void*>*)  (in basic_server)        11
+        std::basic_ostream<char>::__put_num_integer_promote[abi:nqe210106]<int>(int)  (in libc++.1.dylib)        11
+        std::getline[abi:nqe210106]<char>(std::basic_istream<char>&, std::basic_string<char>&, char)  (in basic_server)        11
+        mach_msg2_internal  (in libsystem_kernel.dylib)        10
+        nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>::operator[](std::basic_string<char>)  (in basic_server)        10
+        std::__function::__func<swiftnet::SwiftNet::cors(std::basic_string<char> const&)::$_0, void (swiftnet::Request&, swiftnet::Response&, std::function<void ()>)>::operator()(swiftnet::Request&, swiftnet::Response&, std::function<void ()>&&)  (in basic_server)        10
+        std::basic_string<char>::__init_copy_ctor_external(char const*, unsigned long)  (in basic_server)        10
+        swiftnet::SwiftNet::handle_request_async(swiftnet::http::request const&, swiftnet::http::response&) (.resume)  (in basic_server)        10
+        swiftnet::vthread_scheduler::worker(unsigned long)  (in basic_server)        10
+        DYLD-STUB$$__error  (in libsystem_c.dylib)        9
+        DYLD-STUB$$memcmp  (in basic_server)        9
+        clock_gettime_nsec_np  (in libsystem_c.dylib)        9
+        localeconv  (in libsystem_c.dylib)        9
+        nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>::dump(int, char, bool, nlohmann::json_abi_v3_11_3::detail::error_handler_t) const  (in basic_server)        9
+        operator_new_impl[abi:nqe210106](unsigned long, std::__type_descriptor_t)  (in libc++abi.dylib)        9
+        spdlog::logger::log_it_(spdlog::details::log_msg const&, bool, bool)  (in basic_server)        9
+        spdlog::sinks::ansicolor_sink<spdlog::details::console_mutex>::log(spdlog::details::log_msg const&)  (in basic_server)        9
+        std::__hash_table<std::__hash_value_type<std::basic_string<char>, std::basic_string<char>>>::find<std::basic_string<char>>(std::basic_string<char> const&) const  (in basic_server)        9
+        std::basic_string<char>::__grow_by_and_replace(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, char const*)  (in libc++.1.dylib)        9
+        std::basic_string<char>::append(unsigned long, char)  (in libc++.1.dylib)        9
+        std::locale::~locale()  (in libc++.1.dylib)        9
+        std::num_put<char, std::ostreambuf_iterator<char>>::__do_put_integral[abi:nqe210106]<long>(std::ostreambuf_iterator<char>, std::ios_base&, char, long) const  (in libc++.1.dylib)        9
+        xzm_malloc_zone_malloc_type_malloc  (in libsystem_malloc.dylib)        9
+        __cxa_decrement_exception_refcount  (in libc++abi.dylib)        8
+        __error  (in libsystem_kernel.dylib)        8
+        nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>::operator[]<char const>(char const*)  (in basic_server)        8
+        nlohmann::json_abi_v3_11_3::detail::external_constructor<(nlohmann::json_abi_v3_11_3::detail::value_t)3>::construct<nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>, char [35], 0>(nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>&, char const (&) [35])  (in basic_server)        8
+        spdlog::details::fmt_helper::pad3<unsigned int>(unsigned int, fmt::v11::basic_memory_buffer<char, 250ul, fmt::v11::detail::allocator<char>>&)  (in basic_server)        8
+        std::basic_regex<char, std::regex_traits<char>>::__search<std::allocator<std::sub_match<char const*>>>(char const*, char const*, std::match_results<char const*>&, std::regex_constants::match_flag_type) const  (in basic_server)        8
+        std::basic_string<char>::__assign_no_alias<true>(char const*, unsigned long)  (in basic_server)        8
+        std::ios_base::init(void*)  (in libc++.1.dylib)        8
+        std::ios_base::~ios_base()  (in libc++.1.dylib)        8
+        std::this_thread::sleep_for(std::chrono::duration<long long, std::ratio<1l, 1000000000l>> const&)  (in libc++.1.dylib)        8
+        fwrite  (in libsystem_c.dylib)        7
+        std::__tree<std::__value_type<std::basic_string<char>, nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>>, std::__map_value_compare<std::basic_string<char>, std::pair<std::basic_string<char> const, nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>>, true>>::destroy(std::__tree_node<std::__value_type<std::basic_string<char>, nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, bool, long long, unsigned long long, double, std::allocator, nlohmann::json_abi_v3_11_3::adl_serializer, std::vector<unsigned char>, void>>, void*>*)  (in basic_server)        7
+        std::basic_istream<char>::sentry::sentry(std::basic_istream<char>&, bool)  (in libc++.1.dylib)        7
+        swiftnet::Request::Request(swiftnet::http::request const&)  (in basic_server)        7
+        swiftnet::Response::Response()  (in basic_server)        7
+        swiftnet::SwiftNet::run_middlewares(swiftnet::Request&, swiftnet::Response&)  (in basic_server)        7
+        swiftnet::detail::final_transfer(std::coroutine_handle<void>, std::coroutine_handle<void>)  (in basic_server)        7
+        swiftnet::event_loop::wait(swiftnet::io_event*, int, int)  (in basic_server)        7
+        _platform_memchr  (in libsystem_platform.dylib)        6
+        flockfile  (in libsystem_c.dylib)        6
+        localeconv_l  (in libsystem_c.dylib)        6
+        operator new(unsigned long, std::__type_descriptor_t)  (in libc++abi.dylib)        6
+        std::__hash_table<std::__hash_value_type<std::basic_string<char>, std::basic_string<char>>>::__emplace_unique_key_args<std::basic_string<char>, std::piecewise_construct_t const&, std::tuple<std::basic_string<char>&&>, std::tuple<>>(std::basic_string<char> const&, std::piecewise_construct_t const&, std::tuple<std::basic_string<char>&&>&&, std::tuple<>&&)  (in basic_server)        6
+        std::basic_ostringstream<char>::basic_ostringstream[abi:nqe210106]()  (in basic_server)        6
+        std::exception_ptr::~exception_ptr()  (in libc++.1.dylib)        6
+        DYLD-STUB$$mach_absolute_time  (in libsystem_malloc.dylib)        5
+        DYLD-STUB$$pthread_mutex_lock  (in libc++.1.dylib)        5
+        DYLD-STUB$$pthread_mutex_unlock  (in libc++.1.dylib)        5
+        _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib)        5
+        _swrite  (in libsystem_c.dylib)        5
+        cerror  (in libsystem_kernel.dylib)        5
+        free  (in libsystem_malloc.dylib)        5
+        nlohmann::json_abi_v3_11_3::detail::output_string_adapter<char, std::basic_string<char>>::write_character(char)  (in basic_server)        5
+        spdlog::logger::sink_it_(spdlog::details::log_msg const&)  (in basic_server)        5
+        spdlog::pattern_formatter::format(spdlog::details::log_msg const&, fmt::v11::basic_memory_buffer<char, 250ul, fmt::v11::detail::allocator<char>>&)  (in basic_server)        5
+        std::locale::id::__get()  (in libc++.1.dylib)        5
+        std::mutex::unlock()  (in libc++.1.dylib)        5
+        std::to_string(long long)  (in libc++.1.dylib)        5
+        swiftnet::net::tcp_socket::async_read(void*, unsigned long) (.resume)  (in basic_server)        5
+
+Binary Images:
+       0x100d04000 -        0x100d90b1f +basic_server (0) <237A4E6A-8BAD-30C0-801C-AF3D7F86BC7B> /Users/*/Downloads/*/basic_server
+       0x18dd70000 -        0x18ddc2b4b  libobjc.A.dylib (951.7) <FF1D8AE4-ABEF-35F1-A30A-1183B9CB414F> /usr/lib/libobjc.A.dylib
+       0x18ddc3000 -        0x18ddf7d07  libdyld.dylib (1378) <B147D877-D0C2-388F-B38D-D3132E39905F> /usr/lib/system/libdyld.dylib
+       0x18ddf8000 -        0x18de9e217  dyld (1.0.0 - 1378) <A237EF81-B68B-37BA-A165-92C965529534> /usr/lib/dyld
+       0x18de9f000 -        0x18dea2228  libsystem_blocks.dylib (96) <CC947089-488D-316B-A9C7-46DEC0F73145> /usr/lib/system/libsystem_blocks.dylib
+       0x18dea3000 -        0x18def755f  libxpc.dylib (3102.120.13) <C40FCAE8-7A17-3D82-87CB-3DA4802ADEF1> /usr/lib/system/libxpc.dylib
+       0x18def8000 -        0x18df189ff  libsystem_trace.dylib (1861.120.4) <D0FABAB3-5AE7-3F10-8C62-60CBF5D70850> /usr/lib/system/libsystem_trace.dylib
+       0x18df19000 -        0x18dfc75f7  libcorecrypto.dylib (1922.121.1) <A01A158D-6FE7-3B1C-A2C4-6BCB90D7314A> /usr/lib/system/libcorecrypto.dylib
+       0x18dfc8000 -        0x18e0181d7  libsystem_malloc.dylib (812.100.31) <5FAE4807-4D2B-3A95-A63A-DD96D3DA11B4> /usr/lib/system/libsystem_malloc.dylib
+       0x18e019000 -        0x18e06023f  libdispatch.dylib (1542.100.32) <F071EFE4-299F-3089-ACC4-0025B8FFB52A> /usr/lib/system/libdispatch.dylib
+       0x18e061000 -        0x18e063ffb  libsystem_featureflags.dylib (103) <71FCFFBD-85F8-3365-AFE0-BECEA4369122> /usr/lib/system/libsystem_featureflags.dylib
+       0x18e064000 -        0x18e0e4d9f  libsystem_c.dylib (1752.120.2) <694B7881-1BF3-3D0F-8F19-B50AE4E8EF8A> /usr/lib/system/libsystem_c.dylib
+       0x18e0e5000 -        0x18e175ae7  libc++.1.dylib (2100.43) <5013C0F8-84A9-3B56-9FEB-C353816A750F> /usr/lib/libc++.1.dylib
+       0x18e176000 -        0x18e19075f  libc++abi.dylib (2100.43) <E482D257-E5A0-3816-BD97-7B39342958DA> /usr/lib/libc++abi.dylib
+       0x18e191000 -        0x18e1ce2af  libsystem_kernel.dylib (12377.121.6) <CC1CF985-BC65-3725-809F-4C1E36B8F4BA> /usr/lib/system/libsystem_kernel.dylib
+       0x18e1cf000 -        0x18e1dbb3b  libsystem_pthread.dylib (539.100.4) <4F33683C-18C8-39A1-800B-2E3BD43BCC13> /usr/lib/system/libsystem_pthread.dylib
+       0x18e1dc000 -        0x18e1e4963  libsystem_platform.dylib (375.120.2) <160FD864-8D15-36FC-9E97-9725388CFAFE> /usr/lib/system/libsystem_platform.dylib
+       0x18e1e5000 -        0x18e2146eb  libsystem_info.dylib (600) <3D62F2D9-F516-31BF-83C7-E203D872300B> /usr/lib/system/libsystem_info.dylib
+       0x1921ac000 -        0x1921b5e5f  libsystem_darwin.dylib (1752.120.2) <8858F025-745A-388E-9544-080781CC9A69> /usr/lib/system/libsystem_darwin.dylib
+       0x192617000 -        0x1926291b6  libsystem_notify.dylib (348.120.4) <64D76451-1E0C-369B-A631-54DA3140E083> /usr/lib/system/libsystem_notify.dylib
+       0x1948e4000 -        0x1948fef7b  libsystem_networkextension.dylib (2226.120.19) <3A1DAD41-F14F-3595-B9BB-058A84308BE7> /usr/lib/system/libsystem_networkextension.dylib
+       0x194981000 -        0x194998fdf  libsystem_asl.dylib (406) <F40838DF-2F15-3F62-970F-DEE25706BF1B> /usr/lib/system/libsystem_asl.dylib
+       0x19653f000 -        0x196547387  libsystem_symptoms.dylib (2169.120.7) <F5029F5C-1BF3-31C7-892E-BC8606AC829E> /usr/lib/system/libsystem_symptoms.dylib
+       0x19a7e3000 -        0x19a81b257  libsystem_containermanager.dylib (725.120.2) <518BE44D-AA31-31E6-B44B-A37AD5E47040> /usr/lib/system/libsystem_containermanager.dylib
+       0x19bbf4000 -        0x19bbf85d7  libsystem_configuration.dylib (1405.120.5) <0F7BBC1C-3D50-3E59-A31F-E4672A80BCEB> /usr/lib/system/libsystem_configuration.dylib
+       0x19bbf9000 -        0x19bbff8cf  libsystem_sandbox.dylib (2680.120.12) <EC3A75EA-44C0-3A0B-9BF7-71C117B0A9C6> /usr/lib/system/libsystem_sandbox.dylib
+       0x19d253000 -        0x19d2561fb  libquarantine.dylib (196.120.2) <5849009B-ACA3-3796-94C4-BBDF8D300EBA> /usr/lib/system/libquarantine.dylib
+       0x19d9f2000 -        0x19d9f8d03  libsystem_coreservices.dylib (191.4.5) <9576143B-C303-35A3-BA63-1FD06EDA2BB1> /usr/lib/system/libsystem_coreservices.dylib
+       0x19df7d000 -        0x19dfbaa77  libsystem_m.dylib (3312.100.1) <A7E0863C-101A-31A0-922B-ED9B02626151> /usr/lib/system/libsystem_m.dylib
+       0x19dfbc000 -        0x19dfbf527  libmacho.dylib (1378) <755441B4-C034-3E3A-8E3C-F424FBB28261> /usr/lib/system/libmacho.dylib
+       0x19dfd9000 -        0x19dfe63a7  libcommonCrypto.dylib (600035) <CE357BB1-2D49-37CC-9FFE-D093936B1475> /usr/lib/system/libcommonCrypto.dylib
+       0x19dfe7000 -        0x19dff0ca3  libunwind.dylib (2100.2) <FC8F0C4E-6FB0-3E27-ABEF-B0FA720CD5E4> /usr/lib/system/libunwind.dylib
+       0x19dff9000 -        0x19e0037ff  libcopyfile.dylib (240) <8ACFAC7A-88E9-3EF4-853F-A9140FF110E5> /usr/lib/system/libcopyfile.dylib
+       0x19e004000 -        0x19e007987  libcompiler_rt.dylib (103.3) <AA79151F-C19D-3C7C-92F8-B10F04D82C1C> /usr/lib/system/libcompiler_rt.dylib
+       0x19e008000 -        0x19e00c78b  libsystem_collections.dylib (1752.120.2) <72DB5BE7-EF78-37D0-8AAD-53E37CFE4287> /usr/lib/system/libsystem_collections.dylib
+       0x19e00d000 -        0x19e0104cf  libsystem_secinit.dylib (168.100.7) <E525C566-CDA4-3D99-B12B-1615FD54A1F3> /usr/lib/system/libsystem_secinit.dylib
+       0x19e011000 -        0x19e013bf7  libremovefile.dylib (85.100.6) <635E661D-80A7-340D-A165-3F7D318FDFC9> /usr/lib/system/libremovefile.dylib
+       0x19e014000 -        0x19e014f27  libkeymgr.dylib (31) <8C08891A-DF1C-3DCC-AB64-4742FD6BE9BA> /usr/lib/system/libkeymgr.dylib
+       0x19e015000 -        0x19e01de37  libsystem_dnssd.dylib (2881.120.11) <6F45DF3F-233B-3BC3-BA8C-B43E7DA884BF> /usr/lib/system/libsystem_dnssd.dylib
+       0x19e01e000 -        0x19e02309b  libcache.dylib (95) <189B576E-6176-3F82-8FA4-5914B0BEAEE7> /usr/lib/system/libcache.dylib
+       0x19e024000 -        0x19e025ce3  libSystem.B.dylib (1356) <D65E4112-C151-3FF8-BEB7-4841436012D6> /usr/lib/libSystem.B.dylib
+       0x29125b000 -        0x291262349  libRosetta.dylib (367.9) <8651ED4F-6506-3788-B56B-32EE414A85CA> /usr/lib/libRosetta.dylib
+       0x292e78000 -        0x292e7ba4b  libsystem_darwindirectory.dylib (122) <CF277A2C-C818-3F16-8B3F-3C7B39FCD164> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x292e7c000 -        0x292e855d3  libsystem_eligibility.dylib (319.121.1) <DDAC0531-0262-3DDC-8EC8-80EB9438847A> /usr/lib/system/libsystem_eligibility.dylib
+       0x292e86000 -        0x292e8d88b  libsystem_sanitizers.dylib (26.1) <44C4234F-8B2D-38D3-A774-B4B3C75AF3A7> /usr/lib/system/libsystem_sanitizers.dylib
+       0x292e8e000 -        0x292e8ebb7  libsystem_trial.dylib (474.2.18.2) <68C583BA-AFF5-3916-86AE-6E38BFEF98D6> /usr/lib/system/libsystem_trial.dylib

@@ -4,6 +4,7 @@
 #include "http/http_server.hpp"
 #include "net/tcp_socket.hpp"
 #include "vthread.hpp"
+#include "detail/router.hpp"
 #include <functional>
 #include <memory>
 #include <regex>
@@ -138,13 +139,11 @@ namespace swiftnet
         bool ended_{false};
     };
 
-    // Route structure
+    // Route structure (matching is done by the compiled radix Router, not regex).
     struct Route
     {
         std::string method;
         std::string pattern;
-        std::regex regex;
-        std::vector<std::string> param_names;
         handler_t handler;
     };
 
@@ -208,6 +207,7 @@ namespace swiftnet
         bool shutdown_requested_{false};
 
         std::vector<Route> routes_;
+        detail::Router router_; // radix matcher: pattern -> index into routes_
         std::vector<std::pair<std::string, ws::handler_t>> ws_routes_;
         std::vector<middleware_t> middlewares_;
         std::vector<std::pair<std::string, middleware_t>> path_middlewares_;
@@ -218,9 +218,6 @@ namespace swiftnet
         // Coroutine bridge: builds Request/Response, runs middleware, then
         // co_awaits the matched async handler. Awaited by the http catch-all.
         vthread handle_request_async(const http::request &req, http::response &res);
-        bool match_route(const Route &route, const std::string &method,
-                         const std::string &path, Request &request);
-        Route create_route(const std::string &method, const std::string &pattern, handler_t handler);
         // Run the applicable middleware chain. Returns true if it fell through to
         // the route handler (no middleware short-circuited the request).
         bool run_middlewares(Request &req, Response &res);

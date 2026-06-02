@@ -7,6 +7,8 @@ benchmark/node_modules/
 benchmark/results/
 benchmark/springboot/build/
 benchmark/springboot/.gradle/
+benchmark/springboot-webflux/build/
+benchmark/springboot-webflux/.gradle/
 
 # Runtime artifacts / logs / generated example assets
 *.log

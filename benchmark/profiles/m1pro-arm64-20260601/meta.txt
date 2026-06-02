@@ -1,0 +1,6 @@
+date: 2026-06-02T00:11:42Z
+cpu: Apple M1 Pro
+cores: 10 logical / 10 physical
+os: macOS 26.5 (arm64)
+backend: kqueue
+commit: 420862b

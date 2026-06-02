@@ -3,6 +3,7 @@
 
 #include "detail/mpsc_queue.hpp"
 #include "detail/work_queue.hpp"
+#include "detail/router.hpp"
 #include "event_loop.hpp"
 #include "swiftnet.hpp"
 #include "ws/websocket.hpp"
@@ -147,7 +148,7 @@ TEST_CASE("Request: query, headers, body and JSON parsing")
     http::request hr;
     hr.method = "POST";
     hr.path = "/search?q=hello&n=5";
-    hr.headers["Content-Type"] = "application/json";
+    hr.headers.emplace_back("Content-Type", "application/json");
     hr.body = R"({"a":1,"b":"two"})";
 
     Request req(hr);
@@ -172,6 +173,34 @@ TEST_CASE("Request: route params via set_param")
     req.set_param("id", "42");
     CHECK(req.param("id") == "42");
     CHECK(req.param("nope") == "");
+}
+
+TEST_CASE("Router: static/param/wildcard precedence, backtracking, method")
+{
+    using swiftnet::detail::Router;
+    Router r;
+    r.add("GET", "/", 0);
+    r.add("GET", "/user/:id", 1);
+    r.add("GET", "/user/me", 2);   // static must beat param
+    r.add("GET", "/files/*", 3);   // trailing wildcard
+    r.add("POST", "/user/:id", 4); // method-specific
+
+    Router::Params p;
+    auto m = [&](const char *meth, const char *path) {
+        p.clear();
+        return r.match(meth, path, p);
+    };
+
+    CHECK(m("GET", "/") == 0);
+    CHECK(m("GET", "/user/42") == 1);
+    REQUIRE(p.size() == 1);
+    CHECK(p[0].first == "id");
+    CHECK(p[0].second == "42");
+    CHECK(m("GET", "/user/me") == 2);          // static precedence over :id
+    CHECK(m("GET", "/files/a/b.txt") == 3);    // wildcard matches the rest
+    CHECK(m("POST", "/user/9") == 4);          // method dispatch
+    CHECK(m("DELETE", "/user/9") == Router::npos);
+    CHECK(m("GET", "/nope") == Router::npos);
 }
 
 TEST_CASE("WebSocket handshake accept-key matches the RFC 6455 vector")

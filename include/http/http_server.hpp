@@ -9,25 +9,35 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 #include <atomic>
 
 namespace swiftnet::http
 {
 
+    // Headers as a small vector of pairs: a request/response has only a handful,
+    // so linear scan beats a red-black tree and avoids a node allocation per
+    // header (a measurable per-request cost in profiling).
+    using header_list = std::vector<std::pair<std::string, std::string>>;
+
+    // Set (overwrite-or-append) a header by case-insensitive name.
+    void set_header(header_list &h, std::string_view name, std::string value);
+
     struct request
     {
         std::string method;
         std::string path;
-        std::map<std::string, std::string> headers;
+        header_list headers;
         std::string body;
     };
 
     struct response
     {
         int status{200};
-        std::map<std::string, std::string> headers;
+        header_list headers;
         std::string body;
 
         std::string to_string() const;

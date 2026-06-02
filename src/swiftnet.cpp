@@ -302,8 +302,9 @@ http::response Response::to_http_response() const
 {
     http::response res;
     res.status = status_;
+    res.headers.reserve(headers_.size());
     for (const auto &[key, value] : headers_) {
-        res.headers[key] = value;
+        res.headers.emplace_back(key, value);
     }
     res.body = body_;
     return res;
@@ -329,7 +330,9 @@ SwiftNet::~SwiftNet()
 
 SwiftNet &SwiftNet::add_route(const std::string &method, const std::string &path, handler_t handler)
 {
-    routes_.push_back(create_route(method, path, std::move(handler)));
+    std::size_t index = routes_.size();
+    routes_.push_back(Route{method, path, std::move(handler)});
+    router_.add(method, path, index);
     return *this;
 }
 
@@ -535,13 +538,18 @@ vthread SwiftNet::handle_request_async(const http::request &req, http::response 
         }
     }
 
-    // Find matching route. Use the Request's path (query string already
-    // stripped) so routes like "/q" match a request for "/q?name=ada".
+    // Match via the compiled radix router. Uses the Request's path (query string
+    // already stripped) so "/q" matches "/q?name=ada".
     handler_t route_handler = nullptr;
-    for (const auto &route : routes_) {
-        if (match_route(route, request.method(), request.path(), request)) {
-            route_handler = route.handler;
-            break;
+    {
+        thread_local detail::Router::Params params;
+        params.clear();
+        std::size_t idx = router_.match(request.method(), request.path(), params);
+        if (idx != detail::Router::npos)
+        {
+            route_handler = routes_[idx].handler;
+            for (auto &[name, val] : params)
+                request.set_param(std::string(name), std::string(val));
         }
     }
 
@@ -563,67 +571,6 @@ vthread SwiftNet::handle_request_async(const http::request &req, http::response 
 
     res = response.to_http_response();
     co_return;
-}
-
-bool SwiftNet::match_route(const Route &route, const std::string &method, 
-                          const std::string &path, Request &request)
-{
-    if (route.method != method) return false;
-    
-    std::smatch matches;
-    if (!std::regex_match(path, matches, route.regex)) return false;
-    
-    // Extract parameters
-    for (size_t i = 0; i < route.param_names.size() && i + 1 < matches.size(); ++i) {
-        request.set_param(route.param_names[i], matches[i + 1].str());
-    }
-    
-    return true;
-}
-
-Route SwiftNet::create_route(const std::string &method, const std::string &pattern, handler_t handler)
-{
-    Route route;
-    route.method = method;
-    route.pattern = pattern;
-    route.handler = handler;
-    
-    // Convert Express-style patterns to regex
-    std::string regex_pattern = pattern;
-    std::regex param_regex(R"(:([\w]+))");
-    std::smatch matches;
-    
-    size_t offset = 0;
-    while (std::regex_search(regex_pattern.cbegin() + offset, regex_pattern.cend(), matches, param_regex)) {
-        route.param_names.push_back(matches[1].str());
-        size_t pos = offset + matches.position();
-        regex_pattern.replace(pos, matches.length(), "([^/]+)");
-        offset = pos + 7; // length of "([^/]+)"
-    }
-    
-    // Handle wildcards
-    std::replace(regex_pattern.begin(), regex_pattern.end(), '*', '.');
-    if (regex_pattern.back() != '*') {
-        regex_pattern += "$";  // Exact match
-    } else {
-        regex_pattern.pop_back();  // Remove the '.' we just added
-        regex_pattern += "*";      // Keep the wildcard
-    }
-    
-    // Add start anchor
-    if (regex_pattern.front() != '^') {
-        regex_pattern = "^" + regex_pattern;
-    }
-    
-    try {
-        route.regex = std::regex(regex_pattern);
-    } catch (const std::regex_error &e) {
-        Logger::instance().error("Invalid regex pattern for route " + pattern + ": " + e.what());
-        // Fallback to exact match
-        route.regex = std::regex("^" + std::regex_replace(pattern, std::regex(R"([.*+?^${}()|[\]\\])"), R"(\$&)") + "$");
-    }
-    
-    return route;
 }
 
 bool SwiftNet::run_middlewares(Request &req, Response &res)
