@@ -3,6 +3,7 @@
 #include "detail/os_backend.hpp"
 #include "detail/log.hpp"
 #include <cstdint>
+#include <cstdlib>
 
 #ifdef __linux__
 #include <pthread.h>
@@ -95,11 +96,21 @@ void vthread_scheduler::start(std::size_t threads)
         engines_.push_back(std::move(e));
     }
 
+    // Work-stealing valve config (env overrides; conservative defaults).
+    if (const char *s = std::getenv("SWIFTNET_STEAL"))
+        steal_enabled_.store(s[0] == '1' || s[0] == 't' || s[0] == 'T', std::memory_order_relaxed);
+    if (const char *t = std::getenv("SWIFTNET_STEAL_THRESHOLD"))
+    {
+        int v = std::atoi(t);
+        steal_threshold_ = v < 0 ? 0 : v;
+    }
+
     running_ = true;
     for (std::size_t i = 0; i < ncores_; ++i)
         engines_[i]->thread = std::thread([this, i] { run(*engines_[i]); });
 
-    SWIFTNET_LOG_INFO("scheduler online: {} per-core engines", ncores_);
+    SWIFTNET_LOG_INFO("scheduler online: {} per-core engines (steal={}, threshold={})",
+                      ncores_, steal_enabled_.load(std::memory_order_relaxed) ? 1 : 0, steal_threshold_);
 }
 
 void vthread_scheduler::stop()
@@ -122,6 +133,17 @@ void vthread_scheduler::stop()
         // Discard any not-yet-started injected roots (their dtors free frames).
         vthread t;
         while (e->inbox.pop(t)) { /* dtor destroys */ }
+        // Drop any pending compute tasks; their suspended connection frames are
+        // owned by roots and freed by roots.clear() below.
+        {
+            std::lock_guard<std::mutex> lk(e->compute_mtx);
+            for (ComputeTask *ct : e->compute_q)
+                delete ct;
+            e->compute_q.clear();
+            e->compute_depth.store(0, std::memory_order_relaxed);
+        }
+        std::coroutine_handle<> rh;
+        while (e->resume_q.pop(rh)) { /* handle is a root; freed by roots.clear() */ }
         e->completed.clear();
         e->roots.clear();   // destroys still-suspended root frames
         e->io_ops.clear();
@@ -133,6 +155,7 @@ void vthread_scheduler::stop()
         e->loop.reset();
     }
     engines_.clear();
+    g_pending_compute_.store(0, std::memory_order_relaxed);
     SWIFTNET_LOG_INFO("scheduler stopped");
 }
 
@@ -250,12 +273,21 @@ void vthread_scheduler::run(Engine &e)
             }
         }
 
-        int n = e.loop->wait(evs, kBatch, /*timeout_ms*/ -1);
+        // Block forever when nothing is in flight; poll at 1ms (never 0 -- a 0
+        // timeout busy-spins and burns a core, which would unfairly cripple the
+        // valve-off baseline) when compute work exists anywhere, so an engine can
+        // run its own compute and idle engines can steal. The g_pending_compute_
+        // check keeps the pure-I/O path (no offload) on the efficient
+        // infinite-wait path -- zero impact when nothing offloads.
+        int timeout = (g_pending_compute_.load(std::memory_order_relaxed) > 0) ? 1 : -1;
+
+        int n = e.loop->wait(evs, kBatch, timeout);
+        int io_events = 0; // coroutine-resuming events this turn (0 => engine is idle)
         for (int i = 0; i < n; ++i)
         {
             std::uint64_t tok = evs[i].token;
             if (tok == 0)
-                continue; // wake() nudge (e.g. shutdown / inbox inject / listener arm)
+                continue; // wake() nudge (e.g. shutdown / inbox inject / listener arm / steal)
             if (tok == kListenerToken)
             {
                 do_accept(e);
@@ -264,6 +296,7 @@ void vthread_scheduler::run(Engine &e)
                     e.loop->arm(lf, READABLE, kListenerToken); // re-arm one-shot
                 continue;
             }
+            ++io_events;
             auto h = handle_from_token(tok);
             auto it = e.io_ops.find(h.address());
             if (it != e.io_ops.end())
@@ -276,7 +309,9 @@ void vthread_scheduler::run(Engine &e)
             reap(e);
         }
 
-        drain_inbox(e); // cross-thread scheduled roots
+        drain_inbox(e);    // cross-thread scheduled roots
+        drain_resume(e);   // connections handed back after their offloaded compute ran
+        service_compute(e, /*idle=*/io_events == 0); // run/steal one compute task (valve)
     }
 }
 
@@ -354,6 +389,127 @@ void vthread_scheduler::on_root_complete(std::coroutine_handle<> h) noexcept
     }
 }
 
+bool vthread_scheduler::enqueue_compute(std::coroutine_handle<> h, std::function<void()> fn)
+{
+    Engine *e = t_engine_;
+    if (!e)
+    {
+        // No current engine (e.g. called off-thread): run inline, don't suspend.
+        if (fn)
+            fn();
+        return false;
+    }
+    auto *task = new ComputeTask{std::move(fn), h, e};
+    {
+        std::lock_guard<std::mutex> lk(e->compute_mtx);
+        e->compute_q.push_back(task);
+    }
+    e->compute_depth.fetch_add(1, std::memory_order_relaxed);
+    g_pending_compute_.fetch_add(1, std::memory_order_relaxed);
+    stat_io_suspended_.fetch_add(1, std::memory_order_relaxed);
+
+    // Valve on: wake peers so an IDLE engine can come steal this compute task
+    // (the owner keeps servicing its I/O-bound connections). Compute tasks are
+    // rare, so a broad nudge here is cheap. Valve off: nobody steals; the owner
+    // runs it itself (polls via the timeout set in run()).
+    if (steal_enabled_.load(std::memory_order_relaxed))
+        for (auto &p : engines_)
+            if (p.get() != e && p->loop)
+                p->loop->wake();
+    return true;
+}
+
+void vthread_scheduler::drain_resume(Engine &e)
+{
+    std::coroutine_handle<> h;
+    while (e.resume_q.pop(h))
+    {
+        stat_resumed_.fetch_add(1, std::memory_order_relaxed);
+        if (h && !h.done())
+            h.resume(); // resume the connection on its owning engine (I/O pinned here)
+        reap(e);
+    }
+}
+
+vthread_scheduler::ComputeTask *vthread_scheduler::steal_compute(Engine &thief)
+{
+    // Conservative: steal only from a victim whose backlog exceeds the threshold,
+    // taking from the far end (the owner pops the near end). Compute-only; pinned
+    // I/O coroutines are never moved.
+    for (auto &p : engines_)
+    {
+        Engine *v = p.get();
+        if (v == &thief)
+            continue;
+        if (v->compute_depth.load(std::memory_order_relaxed) <= steal_threshold_)
+            continue;
+        std::lock_guard<std::mutex> lk(v->compute_mtx);
+        if (static_cast<int>(v->compute_q.size()) > steal_threshold_)
+        {
+            ComputeTask *t = v->compute_q.back();
+            v->compute_q.pop_back();
+            v->compute_depth.fetch_sub(1, std::memory_order_relaxed);
+            stat_stolen_.fetch_add(1, std::memory_order_relaxed);
+            return t;
+        }
+    }
+    return nullptr;
+}
+
+void vthread_scheduler::service_compute(Engine &e, bool idle)
+{
+    const bool valve = steal_enabled_.load(std::memory_order_relaxed);
+
+    // Hot-path fast exit: with no local compute and no reason to steal, do NOT
+    // touch the compute mutex. This keeps the pure-I/O path (no offload) free of
+    // any per-iteration lock -- compute_depth is a relaxed atomic.
+    if (e.compute_depth.load(std::memory_order_relaxed) == 0 && !(valve && idle))
+        return;
+
+    // Busy engine + valve on: don't run compute now -- keep doing I/O and let an
+    // idle thief take it. Exception: if the local backlog is large, run one
+    // anyway so it can never starve when every engine is saturated.
+    if (valve && !idle && e.compute_depth.load(std::memory_order_relaxed) < kComputeBacklogCap)
+        return;
+
+    // Take one of our own tasks (near end) first.
+    ComputeTask *t = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(e.compute_mtx);
+        if (!e.compute_q.empty())
+        {
+            t = e.compute_q.front();
+            e.compute_q.pop_front();
+        }
+    }
+    if (t)
+        e.compute_depth.fetch_sub(1, std::memory_order_relaxed);
+    else if (valve && idle)
+        t = steal_compute(e); // local empty + idle: steal from a busy victim
+    if (!t)
+        return;
+
+    g_pending_compute_.fetch_sub(1, std::memory_order_relaxed);
+    if (t->fn)
+        t->fn(); // CPU-heavy work runs on THIS engine
+
+    std::coroutine_handle<> h = t->resume;
+    Engine *owner = t->owner;
+    delete t;
+    if (owner == &e)
+    {
+        if (h && !h.done())
+            h.resume(); // ran locally: resume the connection here
+        reap(e);
+    }
+    else
+    {
+        owner->resume_q.push(h); // stolen: hand the resume back to the owner
+        if (owner->loop)
+            owner->loop->wake();
+    }
+}
+
 std::pmr::memory_resource *vthread_scheduler::local_resource(std::size_t engine)
 {
     if (engine >= engines_.size() || !engines_[engine]->arena)
@@ -372,7 +528,12 @@ auto vthread_scheduler::get_stats() const -> Stats
     s.context_switches = stat_ctxsw_.load(std::memory_order_relaxed);
     s.completed = stat_completed_.load(std::memory_order_relaxed);
     s.per_core_executed.reserve(engines_.size());
+    s.per_core_compute_depth.reserve(engines_.size());
     for (const auto &e : engines_)
+    {
         s.per_core_executed.push_back(e->executed.load(std::memory_order_relaxed));
+        s.per_core_compute_depth.push_back(
+            static_cast<uint64_t>(e->compute_depth.load(std::memory_order_relaxed)));
+    }
     return s;
 }

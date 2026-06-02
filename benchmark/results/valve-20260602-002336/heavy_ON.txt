@@ -1,0 +1,9 @@
+Running 17s test @ http://127.0.0.1:8080/compute?n=8000
+  2 threads and 6 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    50.53ms  157.70ms   1.67s    94.05%
+    Req/Sec   194.52     43.62   272.00     55.59%
+  6618 requests in 17.09s, 853.10KB read
+  Socket errors: connect 0, read 0, write 0, timeout 2
+Requests/sec:    387.26
+Transfer/sec:     49.92KB

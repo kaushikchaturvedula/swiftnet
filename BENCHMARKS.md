@@ -151,6 +151,47 @@ it). Optional `-DSWIFTNET_LTO=ON`. None of these move the harness-bound number o
 
 ---
 
+## 4. Work-stealing valve (SCHEDULER experiment — *not* a web-throughput claim)
+
+The §1 finding is that the plain-HTTP workload is loopback-bound, so it can't exercise the scheduler.
+To actually test the work-stealing **valve**, we need a workload where the *server* is the bottleneck:
+a **CPU-bound route** (`GET /compute`, which `co_await swiftnet::offload(...)`s ~10 ms of mixing work
+as a **stealable compute task**) run **alongside** many light I/O-bound connections (`GET /json`). The
+valve (off by default; `SWIFTNET_STEAL=1`, `SWIFTNET_STEAL_THRESHOLD=N`) lets an **idle** engine steal a
+compute task off the engine that owns a heavy connection, so that engine's *light* connections keep low
+tail latency. Only compute tasks are stealable; **pinned I/O coroutines are never moved.**
+
+`benchmark/valve_experiment.sh`, M1 Pro (10 engines, kqueue), 6 heavy `/compute` conns + 100 light
+`/json` conns, 15 s, threshold=1 (`benchmark/results/valve-*`):
+
+| Mode | light /json RPS | light p50 | light p99 | heavy RPS | steals | peak compute depth |
+|---|--:|--:|--:|--:|--:|--:|
+| **A. valve OFF** (offload, pure per-core) | 8,880 | 10.98 ms | 20.27 ms | 89 | 0 | 18 |
+| **B. valve ON** (offload + steal) | **93,234** | **1.06 ms** | 9.42 ms | **387** | 8,102 | 9 |
+| **C. valve ON, INLINE** (no offload) | 1,573 | 62.35 ms | 84.21 ms | 95 | 0 | 0 |
+
+**Verdict: the valve measurably and substantially helps — given offload.**
+- **B vs A:** light p50 **10.98 ms → 1.06 ms (~10×)**, light RPS **8.9K → 93K**, heavy RPS **89 → 387 (4.3×)**.
+  Per-core depth-over-time (`stats_*.txt`): OFF piles a backlog on one engine (depth → 18, **0 steals**);
+  ON keeps depth ≈ 0–1 while steals climb continuously (143 → 1669 → 3883 → 8102). The valve drains the
+  hotspot onto the 9 idle engines.
+- **C is the control:** with the work run **inline** in the pinned connection coroutine, it is
+  **unstealable** (depth 0, 0 steals) and light latency is the *worst* (p50 62 ms). **So the win comes
+  from the offload primitive making compute stealable — the valve cannot rescue inline/pinned work.**
+
+**Honest bounds (robustness run, 12 heavy conns, `benchmark/results/valve-*`):** the valve still helps
+(light 8.8K → 49.5K, p50 11 ms → 1.2 ms, heavy 6×), but valve-ON light throughput falls from 93K (6
+heavy) to **49.5K** (12 heavy) — the valve *redistributes* spare capacity, it does not create it, so the
+benefit shrinks as every engine becomes compute-busy. Magnitude also depends on connection placement
+(here SO_REUSEPORT concentrated the heavy conns, leaving many idle engines to steal to — near-best case).
+
+Caveats: this is a **scheduler** result (compute-bound), not a web-throughput number; `wrk` is co-located,
+so the OFF/ON/INLINE **delta** on the identical workload is the signal. The valve is **off by default**;
+the pure-I/O path is unaffected (gated on an atomic compute counter — verified `/json` ≈ unchanged,
+ThreadSanitizer 0 races under mixed load).
+
+---
+
 ## Backend status
 
 | Backend | Platform | Status | Evidence |
@@ -172,9 +213,12 @@ Backend status is also documented at the top of `include/event_loop.hpp`.
   I/O (DB calls) would shift the picture toward whichever runtime unmounts most cheaply.
 - **Apple Silicon / kqueue only.** io_uring and IOCP are not performance-measured (see above).
 - **No cross-framework throughput claim is made here.** Earlier 3-way runs vs Node/Spring Boot were
-  taken on a *logging* SwiftNet server (≈70K) and are not comparable to these minimal-server numbers;
-  re-running Node (cluster) and Spring Boot against the minimal server on a **dedicated load box** is
-  the right way to compare servers, and is left as future work because this host cannot do it fairly.
+  taken on a *logging* SwiftNet server (≈70K) and are not comparable to these minimal-server numbers.
+  The correct way to compare servers is a **dedicated off-host load box**; a ready-to-run kit for that
+  (AWS Graviton instance recommendations, server/load scripts, and a CPU-saturation monitor that
+  confirms the server is the bottleneck) is in **`benchmark/remote/`** — *setup only; no numbers are
+  produced until two boxes are provisioned.* On a Linux server box that path would also produce the
+  first real-hardware **io_uring** throughput numbers.
 
 ---
 
@@ -199,6 +243,13 @@ sample $(pgrep swiftnet_bench) 6                            # sample on-CPU frac
 ./benchmark/ab_framepool.sh
 # §3b lazy-headers A/B (needs /tmp/bench_eager_headers = pre-change binary)
 ./benchmark/ab_lazy_headers.sh
+
+# §4  Work-stealing valve (OFF vs ON vs INLINE) on the imbalanced workload
+./benchmark/valve_experiment.sh                 # tune: N= HEAVY_C= LIGHT_C= THRESH=
+
+# Off-host throughput (separate boxes; see benchmark/remote/README.md)
+#   server box:  ./benchmark/remote/server_box.sh swiftnet
+#   load box:    SERVER=<server-ip> ./benchmark/remote/load_box.sh swiftnet
 
 # Linux io_uring functional check (compiles + runs; NOT a speed test)
 docker run --rm --security-opt seccomp=unconfined -v "$PWD":/src:ro ubuntu:24.04 bash -c '

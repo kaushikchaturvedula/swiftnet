@@ -1,0 +1,3 @@
+host: Apple M1 Pro / 10 cores (kqueue)
+compute n=8000 (~per-req CPU), heavy=-t3 -c12 /compute, light=-t4 -c100 /json, dur=12s, threshold=1
+SCHEDULER experiment (compute-bound) -- not a web-throughput number.

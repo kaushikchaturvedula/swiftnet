@@ -7,6 +7,7 @@
 #include <atomic>
 #include <coroutine>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <memory_resource>
@@ -60,6 +61,23 @@ namespace swiftnet
         // engine thread); the frame is reaped after the resume unwinds.
         void on_root_complete(std::coroutine_handle<> h) noexcept;
 
+        // --- Compute offload + work-stealing valve (Phase 3d, scheduler experiment) ---
+        // Offload CPU-heavy work off the connection's engine so it does not block
+        // that engine's other (I/O-bound) connections. enqueue_compute() suspends
+        // the calling coroutine, queues a stealable compute task on the current
+        // engine, and (valve on) wakes peers so an IDLE engine can steal and run
+        // it; the connection is then resumed ON ITS OWNING ENGINE (its I/O is
+        // pinned there). Returns true if the work was queued (caller stays
+        // suspended), false if run inline because there is no current engine.
+        // Only compute tasks are stealable; I/O coroutines are never stolen.
+        bool enqueue_compute(std::coroutine_handle<> h, std::function<void()> fn);
+
+        // Valve controls (runtime-tunable; conservative defaults). Also read from
+        // env at start(): SWIFTNET_STEAL=0|1, SWIFTNET_STEAL_THRESHOLD=<int>.
+        void set_steal(bool on) noexcept { steal_enabled_.store(on, std::memory_order_relaxed); }
+        void set_steal_threshold(int t) noexcept { steal_threshold_ = t < 0 ? 0 : t; }
+        bool steal_enabled() const noexcept { return steal_enabled_.load(std::memory_order_relaxed); }
+
         std::pmr::memory_resource *local_resource(std::size_t engine);
 
         struct Stats
@@ -71,6 +89,7 @@ namespace swiftnet
             uint64_t context_switches{0};
             uint64_t completed{0};
             std::vector<uint64_t> per_core_executed;
+            std::vector<uint64_t> per_core_compute_depth; // current stealable-compute backlog per engine
         };
         Stats get_stats() const;
         std::size_t worker_count() const noexcept { return ncores_; }
@@ -79,12 +98,25 @@ namespace swiftnet
         vthread_scheduler() = default;
         ~vthread_scheduler();
 
+        struct Engine; // defined below; ComputeTask holds an Engine* (owner)
+
         struct IoOp
         {
             int fd{-1};
             std::uint32_t mask{0};
             int result{0};
             bool is_timer{false};
+        };
+
+        // A stealable unit of CPU work created by enqueue_compute(). `fn` runs on
+        // whichever engine picks it up (its owner, or an idle thief); afterwards
+        // `resume` (the suspended connection coroutine) is resumed on `owner` --
+        // the engine where its socket/I/O is pinned.
+        struct ComputeTask
+        {
+            std::function<void()> fn;
+            std::coroutine_handle<> resume;
+            Engine *owner;
         };
 
         // One per core. Touched only by its own thread except `inbox` (MPSC) and
@@ -103,6 +135,20 @@ namespace swiftnet
 
             // Cross-thread injection of new roots (lock-free MPSC).
             detail::mpsc_queue<vthread> inbox;
+
+            // Stealable compute pool. Compute tasks are RARE (only compute-heavy
+            // requests), so a small mutex here is acceptable -- the per-request
+            // I/O path stays lock-free. `compute_depth` mirrors the deque size as
+            // a relaxed atomic so the valve can check the steal threshold and
+            // sample backlog without taking the lock.
+            std::deque<ComputeTask *> compute_q;
+            std::mutex compute_mtx;
+            std::atomic<int> compute_depth{0};
+
+            // Cross-engine "resume this connection" hand-back: a thief that ran a
+            // stolen compute task pushes the connection handle here so the owning
+            // engine resumes it (where its I/O is pinned). Lock-free MPSC.
+            detail::mpsc_queue<std::coroutine_handle<>> resume_q;
 
             // Listener handed in by add_listener() (armed lazily on this thread).
             std::atomic<int> listen_fd{-1};
@@ -125,11 +171,24 @@ namespace swiftnet
         void do_accept(Engine &e);
         void reap(Engine &e);
 
+        // Compute valve internals.
+        void drain_resume(Engine &e);             // resume connections handed back by thieves
+        void service_compute(Engine &e, bool idle); // run/steal one compute task per loop turn
+        ComputeTask *steal_compute(Engine &thief); // take work from a victim over the threshold
+
         std::vector<std::unique_ptr<Engine>> engines_;
         std::atomic<std::size_t> next_engine_{0};
         std::atomic<bool> running_{false};
         std::size_t ncores_{0};
         mutable std::mutex global_mutex_;
+
+        // Work-stealing valve config + global pending-compute counter (drives the
+        // reactor wait timeout only when compute is in flight; zero otherwise, so
+        // the pure-I/O path is unchanged).
+        std::atomic<bool> steal_enabled_{false};
+        int steal_threshold_{1};
+        std::atomic<int> g_pending_compute_{0};
+        static constexpr int kComputeBacklogCap = 8; // anti-starvation: run own when backed up
 
         // Aggregate stats (relaxed atomics; never on a per-request lock).
         std::atomic<uint64_t> stat_scheduled_{0};
@@ -139,6 +198,31 @@ namespace swiftnet
         std::atomic<uint64_t> stat_ctxsw_{0};
         std::atomic<uint64_t> stat_completed_{0};
     };
+
+    // Awaitable returned by offload(): co_await it from a (coroutine) handler to
+    // run `fn` as a stealable compute task off the connection's engine, then
+    // continue on the connection's owning engine. See enqueue_compute().
+    //
+    //   app.get("/heavy", [](Request&, Response& r) -> vthread {
+    //       co_await swiftnet::offload([&]{ /* CPU-heavy work */ });
+    //       r.json(...);
+    //   });
+    struct offload_awaitable
+    {
+        std::function<void()> fn;
+        bool await_ready() const noexcept { return false; }
+        bool await_suspend(std::coroutine_handle<> h)
+        {
+            // returns true -> stay suspended (queued); false -> ran inline, resume
+            return vthread_scheduler::instance().enqueue_compute(h, std::move(fn));
+        }
+        void await_resume() const noexcept {}
+    };
+
+    inline offload_awaitable offload(std::function<void()> fn)
+    {
+        return offload_awaitable{std::move(fn)};
+    }
 
 }
 
