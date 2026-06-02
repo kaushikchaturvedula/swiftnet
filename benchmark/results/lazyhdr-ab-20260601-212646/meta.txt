@@ -1,0 +1,2 @@
+host: Apple M1 Pro / 10 cores
+load: wrk -t8 -c500 -d12s --latency /json; reps=3

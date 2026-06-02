@@ -72,17 +72,15 @@ namespace swiftnet::http
             }
         };
 
+        // Per-connection coroutine. Created by an engine on accept and pinned to
+        // it (the scheduler creates the SO_REUSEPORT listeners; see start()).
         vthread client_task(net::tcp_socket sock);
-        // Supervisor coroutine: re-runs the accept loop if it ever exits. Taken
-        // by value so the handler is copied into the coroutine frame (a capturing
-        // lambda coroutine would dangle once its closure temporary is destroyed).
-        vthread acceptor_loop(std::function<void(net::tcp_socket)> handler);
 
-        net::acceptor acceptor_;
+        std::uint16_t port_;
+        int backlog_;
         std::map<route_key, handler_t> routes_;
         std::map<std::string, ws::handler_t> ws_routes_;
         std::atomic<bool> running_{false};
-        std::atomic<bool> acceptor_supervisor_running_{false}; // Prevent multiple supervisors
     };
 
 } // namespace swiftnet::http

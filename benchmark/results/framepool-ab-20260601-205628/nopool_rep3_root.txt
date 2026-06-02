@@ -1,0 +1,14 @@
+# variant=nopool rep=3 route=/
+Running 15s test @ http://127.0.0.1:8080/
+  12 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     9.27ms  821.38us  26.11ms   89.36%
+    Req/Sec     8.96k   376.35    12.30k    88.28%
+  Latency Distribution
+     50%    9.38ms
+     75%    9.53ms
+     90%    9.67ms
+     99%   11.25ms
+  1606158 requests in 15.02s, 156.24MB read
+Requests/sec: 106936.56
+Transfer/sec:     10.40MB

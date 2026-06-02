@@ -1,0 +1,14 @@
+# lazy hdr10 rep2
+Running 12s test @ http://127.0.0.1:8080/json
+  8 threads and 500 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.19ms  579.16us  16.68ms   92.57%
+    Req/Sec    11.96k   649.40    19.00k    92.23%
+  Latency Distribution
+     50%    5.22ms
+     75%    5.32ms
+     90%    5.41ms
+     99%    6.56ms
+  1148561 requests in 12.10s, 133.63MB read
+Requests/sec:  94893.90
+Transfer/sec:     11.04MB

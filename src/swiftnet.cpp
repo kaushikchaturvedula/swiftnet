@@ -69,19 +69,35 @@ void Logger::debug(const std::string &message)
 
 // Request implementation
 Request::Request(const http::request &req)
-    : method_(req.method), path_(req.path), body_(req.body)
+    : method_(req.method), path_(req.path), body_(req.body), raw_headers_(&req.headers)
 {
-    // Convert std::map to std::unordered_map
-    for (const auto &[key, value] : req.headers) {
-        headers_[key] = value;
-    }
+    // Headers are NOT copied here: most handlers never read a header, so building
+    // a per-request hash map was pure waste. header() scans the source vector and
+    // headers() builds the map only on demand. (req outlives this Request.)
     parse_query_string();
 }
 
 std::string Request::header(const std::string &name) const
 {
-    auto it = headers_.find(name);
-    return it != headers_.end() ? it->second : "";
+    // Lazy: scan the parser's header vector (few entries; no per-request map).
+    // Exact-name match, preserving the prior headers_.find() semantics.
+    if (raw_headers_)
+        for (const auto &[k, v] : *raw_headers_)
+            if (k == name)
+                return v;
+    return "";
+}
+
+const std::unordered_map<std::string, std::string> &Request::headers() const
+{
+    if (!headers_built_)
+    {
+        if (raw_headers_)
+            for (const auto &[k, v] : *raw_headers_)
+                headers_.emplace(k, v);
+        headers_built_ = true;
+    }
+    return headers_;
 }
 
 std::string Request::query(const std::string &name) const

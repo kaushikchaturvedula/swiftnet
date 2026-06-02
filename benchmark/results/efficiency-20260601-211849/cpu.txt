@@ -1,0 +1,49 @@
+=== server CPU while serving ~118K (wrk -t2 -c200) -> on-CPU fraction ===
+Requests/sec: 116647.49
+total leaf samples: 55879
+idle (kevent/cvwait/psynch/sem): 51410  (92.0%)
+ON-CPU: 4469  (8.0%)
+top on-CPU leaves:
+    1949  read  (in libsystem_kernel.dylib)
+    1728  write  (in libsystem_kernel.dylib)
+     133  mach_absolute_time  (in libsystem_kernel.dylib)
+      78  _xzm_free  (in libsystem_malloc.dylib)
+      76  _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib)
+      53  _platform_memmove  (in libsystem_platform.dylib)
+      39  swiftnet::http::server::client_task(swiftnet::net::tcp_socket) (.resume)  (in swiftnet_ben
+      34  _xzm_xzone_malloc  (in libsystem_malloc.dylib)
+      30  nlohmann::json_abi_v3_11_3::detail::serializer<nlohmann::json_abi_v3_11_3::basic_json<std:
+      25  _free  (in libsystem_malloc.dylib)
+      22  malloc_type_malloc  (in libsystem_malloc.dylib)
+      22  std::basic_string<char>::append(char const*, unsigned long)  (in libc++.1.dylib)
+      17  std::basic_string<char>::push_back(char)  (in libc++.1.dylib)
+      16  _platform_memset  (in libsystem_platform.dylib)
+      14  <deduplicated_symbol>  (in libsystem_malloc.dylib)
+      14  _platform_memcmp  (in libsystem_platform.dylib)
+      12  operator new(unsigned long)  (in libc++abi.dylib)
+      11  swiftnet::SwiftNet::handle_request_async(swiftnet::http::request const&, swiftnet::http::r
+      11  swiftnet::vthread_scheduler::run(swiftnet::vthread_scheduler::Engine&)  (in swiftnet_bench
+      10  _platform_memchr  (in libsystem_platform.dylib)
+      10  nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, boo
+      10  nlohmann::json_abi_v3_11_3::detail::serializer<nlohmann::json_abi_v3_11_3::basic_json<std:
+       9  <deduplicated_symbol>  (in swiftnet_bench)
+       9  DYLD-STUB$$malloc_type_malloc  (in libc++abi.dylib)
+       9  DYLD-STUB$$memmove  (in libc++.1.dylib)
+       8  _tlv_get_addr  (in libdyld.dylib)
+       8  std::__hash_table<std::__hash_value_type<std::basic_string<char>, std::unique_ptr<swiftnet
+       8  std::__hash_table<std::__hash_value_type<void*, swiftnet::vthread_scheduler::IoOp>>::__emp
+       8  swiftnet::SwiftNet::run_middlewares(swiftnet::Request&, swiftnet::Response&)  (in swiftnet
+       7  std::__hash_table<std::__hash_value_type<std::basic_string<char>, std::basic_string<char>>
+       7  swiftnet::detail::Router::walk(swiftnet::detail::Router::Node const*, std::basic_string_vi
+       7  swiftnet::http::response::to_string() const  (in swiftnet_bench)
+       6  DYLD-STUB$$free  (in libc++abi.dylib)
+       6  DYLD-STUB$$memchr  (in swiftnet_bench)
+       6  DYLD-STUB$$operator new(unsigned long)  (in swiftnet_bench)
+       6  DYLD-STUB$$std::basic_string<char>::append(char const*, unsigned long)  (in swiftnet_bench
+       6  localeconv_l  (in libsystem_c.dylib)
+       6  nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std::basic_string<char>, boo
+       6  operator delete(void*)  (in libc++abi.dylib)
+       6  std::__hash_table<std::__hash_value_type<std::basic_string<char>, std::basic_string<char>>
+       6  swiftnet::Response::json(nlohmann::json_abi_v3_11_3::basic_json<std::map, std::vector, std
+       6  swiftnet::net::tcp_socket::async_write(void const*, unsigned long) (.resume)  (in swiftnet
+       5  DYLD-STUB$$operator delete(void*)  (in swiftnet_bench)

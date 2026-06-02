@@ -1,0 +1,14 @@
+# eager minhdr rep3
+Running 12s test @ http://127.0.0.1:8080/json
+  8 threads and 500 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.13ms    1.74ms  48.48ms   96.45%
+    Req/Sec    12.28k     3.25k  108.11k    97.29%
+  Latency Distribution
+     50%    5.05ms
+     75%    5.15ms
+     90%    5.27ms
+     99%    9.08ms
+  1174446 requests in 12.10s, 136.64MB read
+Requests/sec:  97040.90
+Transfer/sec:     11.29MB

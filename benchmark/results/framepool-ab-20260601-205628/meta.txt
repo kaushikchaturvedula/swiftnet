@@ -1,0 +1,7 @@
+host: Darwin 25.5.0 arm64
+Apple M1 Pro
+cores: 10 (perf=8 eff=2)
+wrk: wrk 4.2.0 [kqueue] Copyright (C) 2012 Will Glozer
+load: wrk -t12 -c1000 -d15s --latency  | reps=3  routes=/ /json
+pool_bin:   /Users/user-home/Downloads/projects/swiftnet/build/swiftnet_bench
+nopool_bin: /Users/user-home/Downloads/projects/swiftnet/build-nopool/swiftnet_bench

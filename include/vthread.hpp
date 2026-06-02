@@ -1,9 +1,26 @@
 #ifndef vthread_hpp
 #define vthread_hpp
 
+#include "detail/frame_pool.hpp"
 #include <coroutine>
+#include <cstddef>
 #include <exception>
+#include <new>
 #include <utility>
+
+// Coroutine-frame pooling gate. Measured on Apple Silicon (macOS/arm64) the pool
+// is a ~2% regression -- libmalloc's per-thread magazine already serves same-size
+// same-thread frames as fast -- so it is OFF by default on Apple. It is left ON
+// for non-Apple platforms (e.g. glibc, where the default allocator is weaker for
+// this pattern) but UNVERIFIED there. Override either way:
+//   -DSWIFTNET_FORCE_FRAME_POOL  force ON   -DSWIFTNET_NO_FRAME_POOL  force OFF
+#if defined(SWIFTNET_FORCE_FRAME_POOL)
+#define SWIFTNET_USE_FRAME_POOL 1
+#elif defined(SWIFTNET_NO_FRAME_POOL) || defined(__APPLE__)
+#define SWIFTNET_USE_FRAME_POOL 0
+#else
+#define SWIFTNET_USE_FRAME_POOL 1
+#endif
 
 namespace swiftnet
 {
@@ -41,6 +58,13 @@ namespace swiftnet
             T result_{};
             std::coroutine_handle<> continuation_{};
             std::exception_ptr exception_{};
+
+            // Pooled coroutine-frame allocation (see detail/frame_pool.hpp and the
+            // SWIFTNET_USE_FRAME_POOL gate above; off by default on Apple Silicon).
+#if SWIFTNET_USE_FRAME_POOL
+            static void *operator new(std::size_t n) { return detail::frame_pool::local().allocate(n); }
+            static void operator delete(void *p) noexcept { detail::frame_pool::deallocate(p); }
+#endif
 
             auto get_return_object() noexcept
             {
@@ -140,6 +164,12 @@ namespace swiftnet
         {
             std::coroutine_handle<> continuation_{};
             std::exception_ptr exception_{};
+
+            // Pooled coroutine-frame allocation (void specialization).
+#if SWIFTNET_USE_FRAME_POOL
+            static void *operator new(std::size_t n) { return detail::frame_pool::local().allocate(n); }
+            static void operator delete(void *p) noexcept { detail::frame_pool::deallocate(p); }
+#endif
 
             auto get_return_object() noexcept
             {

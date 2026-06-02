@@ -1,0 +1,18 @@
+=== single-connection latency (pure server round-trip, no queueing) ===
+--- route / ---
+    Latency    26.95us   21.62us   1.59ms   97.14%
+  Latency Distribution
+     50%   25.00us
+     75%   28.00us
+     90%   33.00us
+     99%   64.00us
+Requests/sec:  36120.31
+--- route /json ---
+    Latency    83.13us    1.00ms  28.90ms   99.53%
+    Req/Sec    34.96k     4.02k   42.30k    72.50%
+  Latency Distribution
+     50%   26.00us
+     75%   30.00us
+     90%   36.00us
+     99%  104.00us
+Requests/sec:  34709.40

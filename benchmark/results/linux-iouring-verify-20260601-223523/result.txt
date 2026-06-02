@@ -1,0 +1,21 @@
+Linux io_uring backend verification (FUNCTIONAL ONLY -- NO SPEED CLAIM)
+======================================================================
+Environment : Docker ubuntu:24.04, linux/arm64 (aarch64), kernel 6.12.76-linuxkit
+              (Docker Desktop LinuxKit VM on Apple Silicon host)
+liburing    : 2.5-1build1 (arm64), backend auto-selected = SWIFTNET_BACKEND_IOURING
+Native tune : -mcpu=native correctly applied (proc=aarch64) -- validates CMake logic on real arm64
+
+Result with Docker DEFAULT seccomp:
+  ctest -> 0/2 passed, "Subprocess aborted" in 0.01s.
+  Cause: Docker's default seccomp profile blocks io_uring_setup/io_uring_enter,
+  so io_uring_queue_init() throws at startup. (Known Docker policy, not a SwiftNet bug.)
+  Deployment caveat: io_uring needs an environment that permits its syscalls.
+
+Result with --security-opt seccomp=unconfined:
+  - Library + bench + tests COMPILE cleanly on Linux/io_uring.
+  - Live HTTP round-trip: GET /json -> {"message":"Hello, World!"}  (ring init + accept + poll + read + write OK)
+  - ctest -> 2/2 PASSED (unit 0.33s, integration 0.10s).
+
+Conclusion: the io_uring backend COMPILES and is FUNCTIONALLY CORRECT on Linux/arm64.
+Throughput/latency are UNMEASURED and UNVERIFIED (VM + sandbox; no real-hardware run).
+No performance number is reported for io_uring. kqueue (Apple Silicon) remains the only measured backend.

@@ -96,10 +96,11 @@ int main()
     // Route with parameters - demonstrates I/O suspension and resumption
     app.get("/user/:id", [](Request &req, Response &res) {
         std::string user_id = req.param("id");
-        
-        // Simulate async database lookup that would suspend the virtual thread
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-        
+
+        // NOTE: do NOT block the engine thread here. SwiftNet virtual threads
+        // unmount only on co_await; a blocking call (e.g. std::this_thread::
+        // sleep_for) stalls the whole per-core engine. For real async I/O use an
+        // async handler that co_awaits (see examples/async_demo.cpp).
         Json response;
         response["message"] = "User profile loaded asynchronously";
         response["user_id"] = user_id;

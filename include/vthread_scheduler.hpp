@@ -2,12 +2,12 @@
 #define vthread_scheduler_hpp
 
 #include "detail/mpsc_queue.hpp"
-#include "detail/work_queue.hpp"
+#include "net/tcp_socket.hpp"
 #include "vthread.hpp"
 #include <atomic>
-#include <condition_variable>
 #include <coroutine>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
@@ -19,15 +19,19 @@ namespace swiftnet
 {
     class event_loop;
 
-    // Work-stealing virtual-thread scheduler with a single I/O reactor.
+    // Per-core "engine" scheduler (shared-nothing). Each engine is one pinned
+    // thread that fuses the reactor and the worker: it owns its own event_loop
+    // (kqueue/io_uring/IOCP), its own listener (SO_REUSEPORT), and engine-local
+    // state (pending I/O ops, owned root frames, timers) accessed only on its own
+    // thread -- so the per-request I/O path takes NO locks.
     //
-    // Design (see plan): root coroutine frames are owned by `roots_` from
-    // schedule() until completion, so ownership never moves while a coroutine is
-    // suspended on I/O. Worker threads resume ready coroutine handles drawn from
-    // per-core work-stealing queues. One reactor thread drains the platform event
-    // loop (kqueue/io_uring/IOCP) and, per completion, re-enqueues the suspended
-    // coroutine handle for a worker to resume. Because the owning root is always
-    // live in `roots_`, there is no suspend/arm/resume ownership race.
+    // A connection is pinned to the engine that accepted it: its coroutine, its
+    // socket fds, and its io_ops all live on that one thread, and it always
+    // resumes there. Cross-thread work (schedule() from another thread) is
+    // injected through a lock-free MPSC "foreign inbox" and drained by the engine.
+    //
+    // (Phase 3d will add a conservative work-stealing release valve for compute
+    // tasks on top of this; I/O coroutines remain pinned.)
     class vthread_scheduler
     {
     public:
@@ -36,28 +40,27 @@ namespace swiftnet
         void start(std::size_t threads = std::thread::hardware_concurrency());
         void stop();
 
-        // Schedule a root (fire-and-forget) virtual thread; the scheduler owns
-        // its frame until completion.
-        void schedule(vthread t);
-        void schedule_with_affinity(vthread t, std::size_t preferred_core);
+        // Create one SO_REUSEPORT listener per engine on `port`; each engine
+        // accepts its own connections and runs `on_accept(socket)` pinned to it.
+        void add_listener(std::uint16_t port, int backlog,
+                          std::function<vthread(net::tcp_socket)> on_accept);
 
-        // --- I/O suspension protocol (called from io_awaitable, on a worker) ---
-        // Record the pending op for `h` and arm the reactor. `h` is already fully
-        // suspended and its owning root is live in roots_, so arming here is safe.
+        // Schedule a root (fire-and-forget) virtual thread. May be called from any
+        // thread; the frame is handed to an engine via its foreign inbox.
+        void schedule(vthread t);
+        void schedule_with_affinity(vthread t, std::size_t preferred_engine);
+
+        // --- I/O suspension protocol (called from io_awaitable, ON the engine
+        //     thread that owns the coroutine; routes to that engine, lock-free) ---
         void suspend_for_io(std::coroutine_handle<> h, int fd, std::uint32_t mask);
-        // Arm a one-shot timer for `h` (async_sleep / timers).
         void suspend_for_timer(std::coroutine_handle<> h, int ms);
-        // Called by the reactor when `h`'s op completes: stash the result and
-        // enqueue `h` for resumption on a worker.
-        void resume_from_io(std::coroutine_handle<> h, int result);
-        // Consume the stored result for `h` (from io_awaitable::await_resume).
         int take_io_result(std::coroutine_handle<> h);
 
-        // Called by a coroutine's final_awaitable when a ROOT completes; the
-        // handle is reaped (destroyed) by a worker shortly after.
+        // Called by a coroutine's final_awaitable when a ROOT completes (on its
+        // engine thread); the frame is reaped after the resume unwinds.
         void on_root_complete(std::coroutine_handle<> h) noexcept;
 
-        std::pmr::memory_resource *local_resource(std::size_t core);
+        std::pmr::memory_resource *local_resource(std::size_t engine);
 
         struct Stats
         {
@@ -76,17 +79,6 @@ namespace swiftnet
         vthread_scheduler() = default;
         ~vthread_scheduler();
 
-        void worker(std::size_t core_id);
-        void reactor_loop();
-        void bind_core(std::size_t core);
-        bool try_steal(std::size_t core, std::coroutine_handle<> &out);
-        void wake_worker(std::size_t core);
-        void sleep_worker(std::size_t core);
-        void enqueue(std::coroutine_handle<> h);
-        void enqueue_on(std::coroutine_handle<> h, std::size_t core);
-        void reap_completed();
-        std::size_t select_best_core() const;
-
         struct IoOp
         {
             int fd{-1};
@@ -95,49 +87,57 @@ namespace swiftnet
             bool is_timer{false};
         };
 
-        // Per-core work-stealing: each core owns a Chase-Lev deque (owner
-        // push/pop, thieves steal) plus a lock-free MPSC inbox that any thread
-        // uses to inject work. The owning worker drains its inbox into its deque,
-        // which keeps the deque's single-producer invariant intact.
-        std::vector<std::unique_ptr<detail::work_queue>> queues_;
-        std::vector<std::unique_ptr<detail::mpsc_queue<std::coroutine_handle<>>>> inboxes_;
-        std::vector<std::unique_ptr<std::pmr::monotonic_buffer_resource>> arenas_;
-        std::vector<std::thread> workers_;
-        std::vector<std::unique_ptr<std::atomic<uint32_t>>> core_loads_;
+        // One per core. Touched only by its own thread except `inbox` (MPSC) and
+        // the control fields used to hand it a listener at startup.
+        struct Engine
+        {
+            std::size_t id{0};
+            std::unique_ptr<event_loop> loop;
+            std::thread thread;
+            std::unique_ptr<std::pmr::monotonic_buffer_resource> arena;
 
-        std::vector<std::unique_ptr<std::condition_variable>> worker_conditions_;
-        std::vector<std::unique_ptr<std::mutex>> worker_mutexes_;
-        std::vector<uint8_t> worker_sleeping_;
+            // Engine-local (no locks): result slots, owned roots, reap list.
+            std::unordered_map<void *, IoOp> io_ops;
+            std::unordered_map<void *, vthread> roots;
+            std::vector<std::coroutine_handle<>> completed;
 
-        // Owns root coroutine frames from schedule() until completion.
-        std::unordered_map<void *, vthread> roots_;
-        std::mutex roots_mutex_;
+            // Cross-thread injection of new roots (lock-free MPSC).
+            detail::mpsc_queue<vthread> inbox;
 
-        // Roots that have completed and await reaping (destruction by a worker).
-        std::vector<std::coroutine_handle<>> completed_;
-        std::mutex completed_mutex_;
+            // Listener handed in by add_listener() (armed lazily on this thread).
+            std::atomic<int> listen_fd{-1};
+            std::function<vthread(net::tcp_socket)> on_accept;
+            bool listener_armed{false};
 
-        // Pending I/O ops (result slots), keyed by coroutine handle address.
-        std::unordered_map<void *, IoOp> io_ops_;
-        std::mutex io_ops_mutex_;
+            // per-engine stats
+            std::atomic<uint64_t> executed{0};
 
-        std::atomic<std::size_t> next_core_{0};
+            Engine() = default;
+        };
+
+        // The engine running on the current thread (set at engine start). The
+        // I/O path uses this to reach engine-local state with no locking.
+        static thread_local Engine *t_engine_;
+
+        void run(Engine &e);
+        void bind_core(std::size_t core);
+        void drain_inbox(Engine &e);
+        void do_accept(Engine &e);
+        void reap(Engine &e);
+
+        std::vector<std::unique_ptr<Engine>> engines_;
+        std::atomic<std::size_t> next_engine_{0};
         std::atomic<bool> running_{false};
-        std::atomic<bool> reactor_running_{false};
-        std::thread reactor_thread_;
         std::size_t ncores_{0};
         mutable std::mutex global_mutex_;
 
-        // Hot-path counters are relaxed atomics so statistics never touch a mutex.
+        // Aggregate stats (relaxed atomics; never on a per-request lock).
         std::atomic<uint64_t> stat_scheduled_{0};
         std::atomic<uint64_t> stat_io_suspended_{0};
         std::atomic<uint64_t> stat_resumed_{0};
         std::atomic<uint64_t> stat_stolen_{0};
         std::atomic<uint64_t> stat_ctxsw_{0};
         std::atomic<uint64_t> stat_completed_{0};
-        std::vector<std::unique_ptr<std::atomic<uint64_t>>> per_core_executed_;
-
-        std::unique_ptr<event_loop> event_loop_;
     };
 
 }

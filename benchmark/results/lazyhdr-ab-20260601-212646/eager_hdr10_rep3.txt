@@ -1,0 +1,14 @@
+# eager hdr10 rep3
+Running 12s test @ http://127.0.0.1:8080/json
+  8 threads and 500 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.41ms  568.24us  21.11ms   90.67%
+    Req/Sec    11.49k   488.41    14.06k    89.90%
+  Latency Distribution
+     50%    5.44ms
+     75%    5.54ms
+     90%    5.61ms
+     99%    7.01ms
+  1098427 requests in 12.01s, 127.80MB read
+Requests/sec:  91445.11
+Transfer/sec:     10.64MB

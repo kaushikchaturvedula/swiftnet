@@ -193,7 +193,7 @@ std::string response::to_string() const
     return out;
 }
 
-server::server(uint16_t port, int backlog) : acceptor_(port, backlog)
+server::server(uint16_t port, int backlog) : port_(port), backlog_(backlog)
 {
     SWIFTNET_LOG_DEBUG("http::server constructed (port={}, backlog={})", port, backlog);
 }
@@ -216,39 +216,14 @@ void server::start(std::size_t threads)
         return;
     running_ = true;
 
-    // The scheduler owns the I/O reactor; starting it brings the event loop online.
+    // Bring up the per-core engines, then give each one its own SO_REUSEPORT
+    // listener. Each engine accepts its own connections and runs client_task
+    // pinned to it (no cross-thread handoff on the request path).
     vthread_scheduler::instance().start(threads);
+    vthread_scheduler::instance().add_listener(port_, backlog_,
+        [this](net::tcp_socket sock) { return client_task(std::move(sock)); });
 
-    // Ensure only one acceptor supervisor runs.
-    bool expected = false;
-    if (!acceptor_supervisor_running_.compare_exchange_strong(expected, true))
-        return;
-
-    auto handler = [this](net::tcp_socket sock) {
-        vthread_scheduler::instance().schedule(client_task(std::move(sock)));
-    };
-    vthread_scheduler::instance().schedule(acceptor_loop(std::move(handler)));
-
-    SWIFTNET_LOG_INFO("http::server started with {} worker threads", threads);
-}
-
-vthread server::acceptor_loop(std::function<void(net::tcp_socket)> handler)
-{
-    SWIFTNET_LOG_DEBUG("acceptor supervisor started");
-    while (running_)
-    {
-        try
-        {
-            co_await acceptor_.async_accept(handler);
-        }
-        catch (const std::exception &e)
-        {
-            SWIFTNET_LOG_ERROR("acceptor exception: {}, restarting after delay", e.what());
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
-    acceptor_supervisor_running_ = false;
-    co_return;
+    SWIFTNET_LOG_INFO("http::server started with {} engines", threads);
 }
 
 void server::stop()

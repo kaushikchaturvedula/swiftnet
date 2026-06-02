@@ -1,0 +1,4 @@
+host: Apple M1 Pro / 10 cores  route=/json dur=10s
+=== A) default 10 engines, increasing client load (is it client-bound?) ===
+=== B) match server+client to 10 cores (kill oversubscription) ===
+=== C) does server scale with engines at fixed heavy client? ===

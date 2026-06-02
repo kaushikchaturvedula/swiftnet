@@ -19,13 +19,47 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 endif()
 
 # Compiler-specific flags
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+include(CheckCXXCompilerFlag)
+# Native-CPU tuning (ON by default). Apple clang on arm64 does not accept
+# -march=native, so pick the right per-platform flag and only add it if the
+# compiler actually accepts it. NOTE: on a loopback benchmark this is below the
+# measurement floor (the server is I/O-wait-bound; see BENCHMARKS.md), but it is
+# the correct way to let the optimizer use the host's ISA (NEON/AdvSIMD on ARM,
+# AVX etc. on x86) and matters on a CPU-bound deployment.
+# NOTE: match "Clang" with MATCHES so Apple's "AppleClang" id is included --
+# STREQUAL "Clang" silently skipped this whole block (and -Wall) on macOS.
+option(SWIFTNET_NATIVE "Tune for the host CPU (-mcpu/-march=native)" ON)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O3")
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+    if(SWIFTNET_NATIVE)
+        # Probe the actually-selected compiler/arch. arm64 wants -mcpu=native, x86
+        # wants -march=native; only add whichever the toolchain accepts so the build
+        # never breaks. (Apple's CommandLineTools `c++` rejects both under cross-arch;
+        # pointing CMake at /usr/bin/clang++ enables -mcpu=native on Apple Silicon.)
+        check_cxx_compiler_flag("-mcpu=native" SWIFTNET_HAS_MCPU_NATIVE)
+        check_cxx_compiler_flag("-march=native" SWIFTNET_HAS_MARCH_NATIVE)
+        if(SWIFTNET_HAS_MCPU_NATIVE)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcpu=native")
+        elseif(SWIFTNET_HAS_MARCH_NATIVE)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+        endif()
     endif()
+    message(STATUS "SwiftNet CXX flags: ${CMAKE_CXX_FLAGS} (proc=${CMAKE_SYSTEM_PROCESSOR} osx=${CMAKE_OSX_ARCHITECTURES})")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /O2")
+endif()
+
+# Optional link-time optimization (OFF by default: slower builds, and below the
+# measurement floor on the loopback benchmark). Enable with -DSWIFTNET_LTO=ON.
+option(SWIFTNET_LTO "Enable link-time optimization (IPO)" OFF)
+if(SWIFTNET_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT SWIFTNET_IPO_OK OUTPUT SWIFTNET_IPO_MSG)
+    if(SWIFTNET_IPO_OK)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+    else()
+        message(WARNING "LTO requested but not supported: ${SWIFTNET_IPO_MSG}")
+    endif()
 endif()
 
 # Optional sanitizer build. AddressSanitizer and ThreadSanitizer are mutually
@@ -157,6 +191,11 @@ option(SWIFTNET_BUILD_EXAMPLES "Build SwiftNet examples" ON)
 if(SWIFTNET_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
+
+# Minimal benchmark server (no logging middleware; isolates framework cost)
+add_executable(swiftnet_bench benchmark/swiftnet_bench.cpp)
+target_link_libraries(swiftnet_bench PRIVATE swiftnet nlohmann_json::nlohmann_json spdlog::spdlog)
+target_include_directories(swiftnet_bench PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 # Tests (doctest + ctest)
 option(SWIFTNET_BUILD_TESTS "Build SwiftNet tests" ON)

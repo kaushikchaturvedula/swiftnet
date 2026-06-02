@@ -52,7 +52,11 @@ namespace swiftnet
         const std::string &method() const { return method_; }
         const std::string &path() const { return path_; }
         const std::string &body() const { return body_; }
-        const std::unordered_map<std::string, std::string> &headers() const { return headers_; }
+        // Full header map, built lazily on first call. Most handlers never read
+        // headers, so the parser's header vector is NOT copied into a hash map per
+        // request (Gate A: per-request header-map build/copy was pure waste for
+        // the common path); header()/this accessor scan/build on demand instead.
+        const std::unordered_map<std::string, std::string> &headers() const;
 
         // Get header value
         std::string header(const std::string &name) const;
@@ -78,7 +82,12 @@ namespace swiftnet
         std::string method_;
         std::string path_;
         std::string body_;
-        std::unordered_map<std::string, std::string> headers_;
+        // Source header vector (owned by the http::request on client_task's frame,
+        // which outlives this Request for the whole handler co_await). Scanned by
+        // header() and copied into headers_ only if headers() is called.
+        const http::header_list *raw_headers_{nullptr};
+        mutable std::unordered_map<std::string, std::string> headers_;
+        mutable bool headers_built_{false};
         std::unordered_map<std::string, std::string> query_params_;
         std::unordered_map<std::string, std::string> route_params_;
         mutable Json json_cache_;

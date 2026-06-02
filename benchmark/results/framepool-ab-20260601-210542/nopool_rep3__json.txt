@@ -1,0 +1,14 @@
+# variant=nopool rep=3 route=/json
+Running 15s test @ http://127.0.0.1:8080/json
+  12 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     9.80ms    1.25ms  40.43ms   94.16%
+    Req/Sec     8.47k   444.44    14.00k    90.06%
+  Latency Distribution
+     50%    9.86ms
+     75%   10.01ms
+     90%   10.19ms
+     99%   12.38ms
+  1517290 requests in 15.02s, 176.53MB read
+Requests/sec: 101033.16
+Transfer/sec:     11.76MB

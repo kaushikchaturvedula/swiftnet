@@ -43,6 +43,27 @@ namespace swiftnet
     // is then removed by the kernel. To wait on the same fd again, re-arm. This
     // matches the "co_await arms once, resume once" model of the virtual-thread
     // runtime and removes the need for an explicit del() after every completion.
+    //
+    // ============================ BACKEND STATUS ============================
+    //  kqueue  (macOS/BSD)  : VERIFIED. Primary, fully exercised target. All
+    //                         benchmarks in BENCHMARKS.md were measured on this
+    //                         backend (Apple Silicon / arm64).
+    //  io_uring (Linux)     : IMPLEMENTED but UNVERIFIED. Careful, idiomatic, but
+    //                         deliberately *readiness-based* (io_uring_prep_poll_add,
+    //                         like epoll) -- it does NOT yet use modern io_uring
+    //                         (multishot accept/recv, provided buffers, DEFER_TASKRUN,
+    //                         SEND_ZC). Not benchmarked on real hardware; no speed is
+    //                         claimed. The timer path uses a process-global mutex/map
+    //                         (a known wart vs the per-engine shared-nothing model).
+    //  IOCP    (Windows)    : SKELETON / UNVERIFIED. Readiness arm() is a no-op,
+    //                         timers use a throwaway thread, and wait() reports
+    //                         placeholder readiness. A real port needs OVERLAPPED +
+    //                         WSARecv/WSASend completion integration. Compiles as a
+    //                         shape; NOT a working high-performance backend yet.
+    //
+    // Rule: never report or imply throughput/latency for io_uring or IOCP. Only the
+    // kqueue numbers are real. See BENCHMARKS.md.
+    // ========================================================================
     class event_loop
     {
     public:
