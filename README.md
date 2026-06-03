@@ -74,6 +74,62 @@ app.post("/users", [](Request& req, Response& res) {
 `Json` (nlohmann) is still there for dynamic documents — `res.json(Json{...})` and `req.json()`. The
 typed `json<T>` overload is constrained so it never competes with the dynamic one or with `text()`.
 
+## Request validation (schema constraints)
+
+`req.body<T>()` gives you *shape/type* correctness. For *constraint* validation (required, ranges,
+length, regex, enum — the Ajv-style rules) declare a `swiftnet::schema<T>` with constraints keyed by
+member pointer. Field names are derived at compile time from the member pointer (via Glaze), so you
+never repeat them. It is **opt-in** — a type with no `schema<T>` validates as ok, and routes that
+don't call `validate`/`bind` are on the unchanged hot path.
+
+```cpp
+#include "schema.hpp"
+struct User { std::string name; int age{}; std::string email; std::string role;
+              std::optional<std::string> nickname; };
+
+template <> struct swiftnet::schema<User> {
+    static constexpr auto rules = swiftnet::rules(
+        swiftnet::field<&User::name>(required{}, len(1, 50)),
+        swiftnet::field<&User::age>(range(0, 150)),
+        swiftnet::field<&User::email>(pattern("^[^@]+@[^@]+$")),
+        swiftnet::field<&User::role>(one_of("admin", "user", "guest")),
+        swiftnet::field<&User::nickname>(required{}, max_len(20)));   // optional member
+};
+
+app.post("/users", [](Request& req, Response& res) {
+    auto u = req.bind<User>(res);     // parse + validate; on failure writes 400 JSON, returns nullopt
+    if (!u) return;                   // one-liner happy path
+    // ... use *u ...
+    res.status(201).json(*u);
+});
+// or, for custom handling:  auto v = req.validate<User>();  // -> { bool ok; User value; vector<FieldError> errors }
+```
+
+Constraints (a wrong-type use is a clear **compile error**, e.g. `len` on a numeric field):
+
+| Rule | Applies to | Example |
+|---|---|---|
+| `required{}` | `std::optional<T>` members (fails if absent; no-op on non-optional) | `field<&U::nick>(required{})` |
+| `min(v)` / `max(v)` / `range(lo,hi)` | numeric | `field<&U::age>(range(0,150))` |
+| `min_len(n)` / `max_len(n)` / `len(lo,hi)` | string | `field<&U::name>(len(1,50))` |
+| `pattern("regex")` | string (std::regex; compiled once, thread-local cache) | `field<&U::email>(pattern("^[^@]+@[^@]+$"))` |
+| `one_of(a,b,…)` | string or numeric | `field<&U::role>(one_of("admin","user"))` |
+
+> ⚠️ **`required` only works on `std::optional<T>` fields.** Presence is detected by whether the
+> optional is engaged after parsing. On a **non-optional** field `required{}` is a **silent no-op** —
+> a parsed struct always has every non-optional member (defaulted if the JSON key was absent), so
+> "missing" and "default value" are indistinguishable without re-parsing the raw JSON (which SwiftNet
+> deliberately does not do). **To make a field mandatory, declare it `std::optional<T>` and add
+> `required{}`.**
+
+On failure `bind<T>()` responds **400** with all violations collected:
+
+```json
+{"error":"validation_failed",
+ "details":[{"field":"age","rule":"range","message":"age must be in [0, 150]"},
+            {"field":"email","rule":"pattern","message":"email does not match required pattern"}]}
+```
+
 ## Async handlers and CPU offload
 
 Handlers may be coroutines that `co_await` async I/O. For CPU-heavy work, `co_await

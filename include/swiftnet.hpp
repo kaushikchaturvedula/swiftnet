@@ -5,6 +5,7 @@
 #include "net/tcp_socket.hpp"
 #include "vthread.hpp"
 #include "json.hpp"        // Json (nlohmann) + Glaze typed-JSON facade + GlazeSerializable
+#include "schema.hpp"      // opt-in request validation: schema<T>, validate/bind, Validated, FieldError
 #include "detail/router.hpp"
 #include <functional>
 #include <memory>
@@ -83,6 +84,16 @@ namespace swiftnet
                 return T{};
             return out;
         }
+
+        // Opt-in schema validation (see schema.hpp). validate<T>() parses via body<T>() then
+        // runs schema<T>::rules; with no schema<T> specialization it just returns the parsed
+        // value (ok=true). bind<T>(res) is the one-liner happy path: on validation failure it
+        // writes a structured 400 JSON to `res` and returns nullopt.
+        template <class T>
+        Validated<T> validate() const { return detail::run_validation(body<T>()); }
+
+        template <class T>
+        std::optional<T> bind(Response &res) const; // defined after Response (needs res.status/json)
 
         // Form data parsing
         std::unordered_map<std::string, std::string> form() const;
@@ -172,6 +183,18 @@ namespace swiftnet
         std::string body_;
         bool ended_{false};
     };
+
+    // Request::bind<T> — defined here because it needs the complete Response type.
+    template <class T>
+    std::optional<T> Request::bind(Response &res) const
+    {
+        auto v = validate<T>();
+        if (v.ok)
+            return std::move(v.value);
+        ValidationErrorBody body{"validation_failed", std::move(v.errors)};
+        res.status(400).json(body); // structured 400 via the Glaze Response::json<T> overload
+        return std::nullopt;
+    }
 
     // Route structure (matching is done by the compiled radix Router, not regex).
     struct Route
