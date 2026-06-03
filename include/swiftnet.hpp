@@ -4,6 +4,7 @@
 #include "http/http_server.hpp"
 #include "net/tcp_socket.hpp"
 #include "vthread.hpp"
+#include "json.hpp"        // Json (nlohmann) + Glaze typed-JSON facade + GlazeSerializable
 #include "detail/router.hpp"
 #include <functional>
 #include <memory>
@@ -13,7 +14,6 @@
 #include <vector>
 #include <map>
 #include <filesystem>
-#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <condition_variable>
 #include <mutex>
@@ -28,8 +28,7 @@ namespace swiftnet
     class Request;
     class Response;
 
-    // Type aliases
-    using Json = nlohmann::json;
+    // Type aliases (Json comes from json.hpp).
     using middleware_t = std::function<void(Request &, Response &, std::function<void()>)>;
     // Route handler: a coroutine that may co_await async I/O. Plain sync handlers
     // (void lambdas) are accepted too and adapted automatically (see
@@ -70,7 +69,20 @@ namespace swiftnet
 
         // JSON parsing
         bool is_json() const;
-        Json json() const;
+        Json json() const; // dynamic (nlohmann)
+
+        // Typed parse via Glaze (compile-time reflection, no DOM):
+        //   auto user = req.body<User>();
+        // On malformed/incompatible input returns a default-constructed T (no throw).
+        template <class T>
+        T body() const
+        {
+            T out{};
+            auto ec = glz::read_json(out, body_);
+            if (ec)
+                return T{};
+            return out;
+        }
 
         // Form data parsing
         std::unordered_map<std::string, std::string> form() const;
@@ -113,7 +125,20 @@ namespace swiftnet
         // Content
         Response &text(const std::string &content);
         Response &html(const std::string &content);
-        Response &json(const Json &data);
+        Response &json(const Json &data); // dynamic (nlohmann)
+
+        // Typed serialize via Glaze (compile-time reflection, no DOM):
+        //   res.json(user);   // for any GlazeSerializable struct
+        // Constrained so it never competes with json(const Json&) or text().
+        template <GlazeSerializable T>
+        Response &json(const T &value)
+        {
+            header("Content-Type", "application/json");
+            std::string buf;
+            (void)glz::write_json(value, buf);
+            body_ = std::move(buf);
+            return *this;
+        }
         Response &file(const std::string &filepath);
         Response &send(const std::string &content);
 

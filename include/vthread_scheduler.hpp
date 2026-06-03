@@ -4,6 +4,7 @@
 #include "detail/mpsc_queue.hpp"
 #include "net/tcp_socket.hpp"
 #include "vthread.hpp"
+#include "config.hpp"
 #include <atomic>
 #include <coroutine>
 #include <cstdint>
@@ -38,7 +39,11 @@ namespace swiftnet
     public:
         static vthread_scheduler &instance();
 
-        void start(std::size_t threads = std::thread::hardware_concurrency());
+        // Primary entry: engines + valve come from the resolved Config.
+        void start(const Config &cfg);
+        // Convenience: build a Config (defaults seeded with `threads`), overlay
+        // YAML+env, and start. threads==0 => all logical cores.
+        void start(std::size_t threads = 0);
         void stop();
 
         // Create one SO_REUSEPORT listener per engine on `port`; each engine
@@ -158,6 +163,10 @@ namespace swiftnet
             // per-engine stats
             std::atomic<uint64_t> executed{0};
 
+            // Whether this engine is currently counted in idle_engines_ (for the
+            // steal_min_idle gate). Touched only on its own thread.
+            bool counted_idle{false};
+
             Engine() = default;
         };
 
@@ -173,7 +182,7 @@ namespace swiftnet
 
         // Compute valve internals.
         void drain_resume(Engine &e);             // resume connections handed back by thieves
-        void service_compute(Engine &e, bool idle); // run/steal one compute task per loop turn
+        bool service_compute(Engine &e, bool idle); // run/steal one compute task; true if it did work
         ComputeTask *steal_compute(Engine &thief); // take work from a victim over the threshold
 
         std::vector<std::unique_ptr<Engine>> engines_;
@@ -187,6 +196,9 @@ namespace swiftnet
         // the pure-I/O path is unchanged).
         std::atomic<bool> steal_enabled_{false};
         int steal_threshold_{1};
+        int steal_max_batch_{1};  // max compute tasks run/stolen per engine loop turn
+        int steal_min_idle_{0};   // require >= this many idle engines before stealing
+        std::atomic<int> idle_engines_{0}; // current count of idle engines (min_idle gate)
         std::atomic<int> g_pending_compute_{0};
         static constexpr int kComputeBacklogCap = 8; // anti-starvation: run own when backed up
 

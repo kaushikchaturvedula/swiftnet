@@ -1,6 +1,7 @@
 #include "http/http_server.hpp"
 #include "io_awaitable.hpp"
 #include "detail/log.hpp"
+#include "detail/simd.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -16,9 +17,8 @@ using namespace swiftnet::http;
 
 namespace
 {
-    constexpr std::size_t kMaxHeaderBytes = 64 * 1024;       // 64 KiB of headers
-    constexpr std::size_t kMaxBodyBytes = 8 * 1024 * 1024;   // 8 MiB body cap
-    constexpr std::size_t kMaxRequestBytes = kMaxHeaderBytes + kMaxBodyBytes;
+    // Request size limits are configurable (Config / http::server members); see
+    // parse_request() params and client_task().
 
     bool iequals(std::string_view a, std::string_view b)
     {
@@ -40,7 +40,7 @@ namespace
     // Decode a Transfer-Encoding: chunked body beginning at `start`.
     // Returns 1 complete (body filled, consumed = end offset), 0 need-more, -1 error.
     int decode_chunked(const std::string &data, std::size_t start,
-                       std::string &body, std::size_t &consumed)
+                       std::string &body, std::size_t &consumed, std::size_t max_body)
     {
         std::size_t pos = start;
         body.clear();
@@ -66,7 +66,7 @@ namespace
                 consumed = term + 2;
                 return 1;
             }
-            if (body.size() + chunk_size > kMaxBodyBytes)
+            if (body.size() + chunk_size > max_body)
                 return -1;
             if (data.size() < data_start + chunk_size + 2)
                 return 0; // need chunk data + trailing CRLF
@@ -80,23 +80,26 @@ namespace
 // Returns 1 = complete (req filled, consumed = total bytes), 0 = need more data,
 // -1 = malformed / over limit. Scans with string_view (no istringstream / no
 // header-block copy); headers go into a vector (no per-header tree-node alloc).
-static int parse_request(const std::string &data, request &req, std::size_t &consumed)
+static int parse_request(const std::string &data, request &req, std::size_t &consumed,
+                         std::size_t max_header, std::size_t max_body)
 {
-    auto pos_end = data.find("\r\n\r\n");
-    if (pos_end == std::string::npos)
-        return data.size() > kMaxHeaderBytes ? -1 : 0; // headers incomplete / too large
+    // Header terminator (SIMD-accelerated; see detail/simd.hpp).
+    std::size_t pos_end = detail::simd::find_double_crlf(data.data(), data.size());
+    if (pos_end == detail::simd::npos)
+        return data.size() > max_header ? -1 : 0; // headers incomplete / too large
     std::size_t header_len = pos_end + 4;
 
     std::string_view hv(data.data(), pos_end); // request line + headers, CRLF-separated
     constexpr auto npos = std::string_view::npos;
 
     // Request line: METHOD SP PATH SP VERSION
-    std::size_t rl_end = hv.find("\r\n");
+    std::size_t rl_end = detail::simd::find_crlf(hv.data(), hv.size());
     std::string_view rl = hv.substr(0, rl_end == npos ? hv.size() : rl_end);
-    std::size_t sp1 = rl.find(' ');
+    std::size_t sp1 = detail::simd::find_char(rl.data(), rl.size(), ' ');
     if (sp1 == npos)
         return -1;
-    std::size_t sp2 = rl.find(' ', sp1 + 1);
+    std::size_t sp2_rel = detail::simd::find_char(rl.data() + sp1 + 1, rl.size() - (sp1 + 1), ' ');
+    std::size_t sp2 = (sp2_rel == npos) ? npos : sp1 + 1 + sp2_rel;
     req.method.assign(rl.substr(0, sp1));
     req.path.assign(rl.substr(sp1 + 1, (sp2 == npos ? rl.size() : sp2) - (sp1 + 1)));
 
@@ -105,10 +108,11 @@ static int parse_request(const std::string &data, request &req, std::size_t &con
     std::size_t pos = (rl_end == npos) ? hv.size() : rl_end + 2;
     while (pos < hv.size())
     {
-        std::size_t le = hv.find("\r\n", pos);
+        std::size_t le_rel = detail::simd::find_crlf(hv.data() + pos, hv.size() - pos);
+        std::size_t le = (le_rel == npos) ? npos : pos + le_rel;
         std::string_view line = hv.substr(pos, (le == npos ? hv.size() : le) - pos);
         pos = (le == npos) ? hv.size() : le + 2;
-        std::size_t colon = line.find(':');
+        std::size_t colon = detail::simd::find_char(line.data(), line.size(), ':');
         if (colon == npos)
             continue;
         std::string_view name = line.substr(0, colon);
@@ -124,7 +128,7 @@ static int parse_request(const std::string &data, request &req, std::size_t &con
         te && te->find("chunked") != std::string::npos)
     {
         std::size_t body_consumed = 0;
-        int st = decode_chunked(data, header_len, req.body, body_consumed);
+        int st = decode_chunked(data, header_len, req.body, body_consumed, max_body);
         if (st <= 0)
             return st;
         consumed = body_consumed;
@@ -136,7 +140,7 @@ static int parse_request(const std::string &data, request &req, std::size_t &con
         std::size_t n = 0;
         try { n = std::stoul(*cl); }
         catch (...) { return -1; }
-        if (n > kMaxBodyBytes)
+        if (n > max_body)
             return -1;
         if (data.size() < header_len + n)
             return 0; // need more body bytes
@@ -212,18 +216,36 @@ void server::ws_route(const std::string &path, ws::handler_t h)
 
 void server::start(std::size_t threads)
 {
+    // Direct http::server users: load config seeded with the ctor port/backlog and
+    // requested engine count, then start.
+    Config base;
+    base.port = port_;
+    base.backlog = backlog_;
+    if (threads)
+        base.engines = threads;
+    start(load_config(base));
+}
+
+void server::start(const Config &cfg)
+{
     if (running_)
         return;
     running_ = true;
 
+    // Apply configurable request limits.
+    max_header_bytes_ = cfg.max_header_bytes;
+    max_body_bytes_ = cfg.max_body_bytes;
+    port_ = cfg.port;
+    backlog_ = cfg.backlog;
+
     // Bring up the per-core engines, then give each one its own SO_REUSEPORT
     // listener. Each engine accepts its own connections and runs client_task
     // pinned to it (no cross-thread handoff on the request path).
-    vthread_scheduler::instance().start(threads);
+    vthread_scheduler::instance().start(cfg);
     vthread_scheduler::instance().add_listener(port_, backlog_,
         [this](net::tcp_socket sock) { return client_task(std::move(sock)); });
 
-    SWIFTNET_LOG_INFO("http::server started with {} engines", threads);
+    SWIFTNET_LOG_INFO("http::server started on port {} (backlog={})", port_, backlog_);
 }
 
 void server::stop()
@@ -240,7 +262,7 @@ vthread server::client_task(net::tcp_socket sock)
     {
         request req;
         std::size_t consumed = 0;
-        int st = parse_request(accum, req, consumed);
+        int st = parse_request(accum, req, consumed, max_header_bytes_, max_body_bytes_);
 
         if (st == 0)
         {
@@ -252,7 +274,7 @@ vthread server::client_task(net::tcp_socket sock)
                 co_return;
             }
             accum.append(buf.data(), static_cast<std::size_t>(n));
-            if (accum.size() > kMaxRequestBytes)
+            if (accum.size() > max_header_bytes_ + max_body_bytes_)
             {
                 sock.close(); // oversized request: drop the connection
                 co_return;

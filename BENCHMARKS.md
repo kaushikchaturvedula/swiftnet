@@ -194,13 +194,29 @@ ThreadSanitizer 0 races under mixed load).
 
 ## Backend status
 
+The backend is selected at RUNTIME by auto-detection (see the README "Auto-detection" table): each
+`event_loop` owns one `detail::reactor_backend` chosen from the cached `runtime_info`. On Linux the
+choice (io_uring vs epoll) comes from an actual `io_uring_queue_init` probe, so a sandbox that blocks
+io_uring transparently falls back to epoll.
+
 | Backend | Platform | Status | Evidence |
 |---|---|---|---|
-| **kqueue** | macOS/BSD | ✅ **VERIFIED — measured** | Everything above (Apple Silicon, arm64) |
-| **io_uring** | Linux | ⚙️ Implemented, **functionally verified, throughput UNMEASURED** | Compiles + `ctest` 2/2 pass + live `GET /json` round-trip in Docker `ubuntu:24.04` linux/arm64, kernel 6.12 (`benchmark/results/linux-iouring-verify-*`). Readiness-based (`io_uring_prep_poll_add`); does **not** yet use multishot / provided buffers / `DEFER_TASKRUN`. Docker's default seccomp blocks io_uring (`io_uring_setup`/`enter`), so it needs `--security-opt seccomp=unconfined` — a real deployment caveat. **No speed claim.** |
-| **IOCP** | Windows | 🚧 **Skeleton — UNVERIFIED** | `arm()` readiness is a no-op, timers use a throwaway thread, completion result is a placeholder. Needs real `OVERLAPPED` + `WSARecv/WSASend` integration. Compiles as a shape only. **No speed claim.** |
+| **kqueue** | macOS/BSD | ✅ **VERIFIED — measured** | Everything above (Apple Silicon, arm64); ctest; TSan-clean |
+| **io_uring** | Linux | ⚙️ Implemented, **functionally verified, throughput UNMEASURED** | Compiles + full `ctest` + live `GET /json` in Docker `ubuntu:24.04` linux/arm64 (kernel 6.12, `--security-opt seccomp=unconfined`). Modernized: **per-engine timers** (no global mutex), **eventfd wake** (no cross-thread ring submit), **`COOP_TASKRUN`**. `SINGLE_ISSUER`/`DEFER_TASKRUN` were tried but **aborted at runtime under the test environment** (ring created on the main thread, issued on the engine thread) and could not be validated on real hardware, so they are deliberately omitted. Still readiness-based (`io_uring_prep_poll_add`); **multishot accept + provided buffers/recv are documented future work** (they need scheduler accept-path / recv-awaitable changes). **No speed claim.** |
+| **epoll** | Linux | ⚙️ Implemented, **functionally verified, throughput UNMEASURED** | Auto-selected when the io_uring probe fails (old kernel / seccomp / container — e.g. Docker default seccomp). `EPOLLONESHOT` + `eventfd` wake + per-token `timerfd`; compiles + `event_loop` unit tests + live `GET /json` in Docker. **No speed claim.** |
+| **IOCP** | Windows | 🚧 **Skeleton — UNVERIFIED (uncompiled here)** | A shape behind the backend interface; a real `OVERLAPPED` + `WSARecv/WSASend` completion path (and the Windows `tcp_socket` integration) is **not done** — there is no Windows toolchain available to even compile it. **No speed claim.** |
 
 Backend status is also documented at the top of `include/event_loop.hpp`.
+
+### Final-phase additions (this round)
+DX + platform work, all keeping the macOS/kqueue path measured-green (ctest 6/6, TSan-clean): runtime
+auto-detection (backend/SIMD/pinning, logged at startup); a layered config system (defaults → YAML →
+env, env wins); typed JSON via Glaze (`res.json(struct)` / `req.body<T>()`) alongside dynamic nlohmann
+`Json`; SIMD byte-scans in the parser (NEON validated natively on Apple Silicon; AVX2/SSE2 for x86 +
+scalar fallback, parity-tested); configurable request limits + new valve knobs (`steal_max_batch`,
+`steal_min_idle`). **None of these change the measured throughput** (§1: the loopback box is
+harness-bound) — they are DX/correctness/portability, and the parser SIMD targets a fraction of the
+~1.4% non-syscall CPU. The C++ standard moved to **C++23** (required by Glaze).
 
 ---
 

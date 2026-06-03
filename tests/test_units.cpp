@@ -143,6 +143,56 @@ TEST_CASE("event_loop: wake() unblocks a blocked wait()")
     CHECK(n == 0);
 }
 
+#if defined(__linux__)
+// The default event_loop on Linux picks io_uring when the probe succeeds, so this
+// drives the epoll backend DIRECTLY via its factory to guarantee both Linux
+// backends are covered by CI (the io_uring path is covered by the cases above when
+// it is selected). Same one-shot/token/timer/wake contract.
+#include "detail/backend/iface.hpp"
+TEST_CASE("epoll_backend: one-shot readiness, timer, and wake")
+{
+    auto b = swiftnet::detail::make_epoll_backend();
+    int fds[2];
+    REQUIRE(::pipe(fds) == 0);
+
+    const std::uint64_t tok = 0x1234ull;
+    b->arm(fds[0], mask_from_poll(POLLIN), tok);
+    io_event evs[4];
+    CHECK(b->wait(evs, 4, 50) == 0);
+    char c = 'x';
+    REQUIRE(::write(fds[1], &c, 1) == 1);
+    int n = b->wait(evs, 4, 1000);
+    REQUIRE(n == 1);
+    CHECK(evs[0].token == tok);
+    CHECK((evs[0].mask & READABLE) != 0);
+    CHECK(b->wait(evs, 4, 100) == 0); // EPOLLONESHOT: consumed
+    REQUIRE(::read(fds[0], &c, 1) == 1);
+
+    // re-arm the same fd must work (EPOLL_CTL_MOD path)
+    REQUIRE(::write(fds[1], &c, 1) == 1);
+    b->arm(fds[0], mask_from_poll(POLLIN), tok);
+    CHECK(b->wait(evs, 4, 1000) == 1);
+    REQUIRE(::read(fds[0], &c, 1) == 1);
+    ::close(fds[0]);
+    ::close(fds[1]);
+
+    // one-shot timer fires once with its token
+    b->arm_timer(0x99ull, 30);
+    n = b->wait(evs, 4, 2000);
+    REQUIRE(n == 1);
+    CHECK(evs[0].token == 0x99ull);
+    CHECK(b->wait(evs, 4, 80) == 0);
+
+    // wake unblocks
+    std::thread waker([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        b->wake();
+    });
+    CHECK(b->wait(evs, 4, 5000) == 0);
+    waker.join();
+}
+#endif
+
 TEST_CASE("Request: query, headers, body and JSON parsing")
 {
     http::request hr;

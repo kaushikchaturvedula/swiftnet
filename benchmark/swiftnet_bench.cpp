@@ -111,20 +111,20 @@ int main(int argc, char **argv)
         res.json(j);
     });
 
-    // Start the scheduler first so the env-driven valve config is parsed before we
-    // print the banner (and so app.listen()'s start() below is a no-op).
-    vthread_scheduler::instance().start(threads ? threads : std::thread::hardware_concurrency());
+    // Engine count via the config layer (programmatic seed; YAML/env can override).
+    // The valve (SWIFTNET_STEAL[_*]) and the full runtime/config banner are handled
+    // by the framework at listen() time; see the logged "SwiftNet runtime/config".
+    if (threads)
+        app.set_threads(threads);
 
-    std::cout << "swiftnet_bench listening on :" << port
-              << " (threads=" << (threads ? std::to_string(threads) : std::string("auto"))
-              << ", steal=" << (vthread_scheduler::instance().steal_enabled() ? "ON" : "OFF")
-              << ", frame_pool="
+    std::cout << "swiftnet_bench starting on :" << port
+              << " (frame_pool="
 #if SWIFTNET_USE_FRAME_POOL
               << "ON"
 #else
               << "OFF"
 #endif
-              << ")" << std::endl;
+              << "); see the SwiftNet runtime/config banner below" << std::endl;
 
     // Optional: sample per-engine compute backlog + cumulative steal count over
     // time, so the valve experiment can plot queue-depth-over-time and steals.

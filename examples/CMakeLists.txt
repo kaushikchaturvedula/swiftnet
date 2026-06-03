@@ -1,13 +1,20 @@
+# README front-door examples (built in CI so they can never go stale).
+foreach(ex hello typed_json)
+    add_executable(${ex} ${ex}.cpp)
+    target_link_libraries(${ex} PRIVATE swiftnet nlohmann_json::nlohmann_json spdlog::spdlog)
+    target_include_directories(${ex} PRIVATE ${CMAKE_SOURCE_DIR}/include)
+endforeach()
+
 # Basic HTTP server example
 add_executable(basic_server basic_server.cpp)
-target_link_libraries(basic_server 
-    PRIVATE 
+target_link_libraries(basic_server
+    PRIVATE
         swiftnet
         nlohmann_json::nlohmann_json
         spdlog::spdlog
 )
-target_include_directories(basic_server 
-    PRIVATE 
+target_include_directories(basic_server
+    PRIVATE
         ${CMAKE_SOURCE_DIR}/include
 )
 

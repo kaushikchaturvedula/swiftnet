@@ -58,7 +58,12 @@ namespace swiftnet::http
         // with an `Upgrade: websocket` header is handshaked and handed to `h`.
         void ws_route(const std::string &path, ws::handler_t h);
 
-        void start(std::size_t threads = std::thread::hardware_concurrency());
+        // Primary: limits + engine count + valve + listener (port/backlog) all
+        // come from the resolved Config.
+        void start(const Config &cfg);
+        // Convenience for direct http::server users: load config (seeded with the
+        // ctor port/backlog and `threads`) then start.
+        void start(std::size_t threads = 0);
         void stop();
 
     private:
@@ -78,6 +83,8 @@ namespace swiftnet::http
 
         std::uint16_t port_;
         int backlog_;
+        std::size_t max_header_bytes_{64 * 1024};      // configurable (Config)
+        std::size_t max_body_bytes_{8 * 1024 * 1024};  // configurable (Config)
         std::map<route_key, handler_t> routes_;
         std::map<std::string, ws::handler_t> ws_routes_;
         std::atomic<bool> running_{false};

@@ -1,6 +1,7 @@
 #include "vthread_scheduler.hpp"
 #include "event_loop.hpp"
 #include "detail/os_backend.hpp"
+#include "detail/runtime_detect.hpp"
 #include "detail/log.hpp"
 #include <cstdint>
 #include <cstdlib>
@@ -77,13 +78,31 @@ vthread_scheduler::~vthread_scheduler() { stop(); }
 
 void vthread_scheduler::start(std::size_t threads)
 {
+    // Build a config seeded with the requested engine count, then overlay YAML+env
+    // (env wins) and start. This is the single place config is loaded for direct
+    // scheduler users (e.g. benchmarks); the framework path passes a Config.
+    Config base;
+    if (threads)
+        base.engines = threads;
+    start(load_config(base));
+}
+
+void vthread_scheduler::start(const Config &cfg)
+{
     std::lock_guard<std::mutex> lock(global_mutex_);
     if (running_)
         return;
 
-    ncores_ = threads ? threads : std::thread::hardware_concurrency();
+    ncores_ = cfg.resolved_engines();
     if (ncores_ == 0)
         ncores_ = 1;
+
+    // Valve config (from the resolved Config; defaults are conservative/OFF).
+    steal_enabled_.store(cfg.steal, std::memory_order_relaxed);
+    steal_threshold_ = cfg.steal_threshold < 0 ? 0 : cfg.steal_threshold;
+    steal_max_batch_ = cfg.steal_max_batch < 1 ? 1 : cfg.steal_max_batch;
+    steal_min_idle_ = cfg.steal_min_idle < 0 ? 0 : cfg.steal_min_idle;
+    idle_engines_.store(0, std::memory_order_relaxed);
 
     engines_.clear();
     engines_.reserve(ncores_);
@@ -96,21 +115,18 @@ void vthread_scheduler::start(std::size_t threads)
         engines_.push_back(std::move(e));
     }
 
-    // Work-stealing valve config (env overrides; conservative defaults).
-    if (const char *s = std::getenv("SWIFTNET_STEAL"))
-        steal_enabled_.store(s[0] == '1' || s[0] == 't' || s[0] == 'T', std::memory_order_relaxed);
-    if (const char *t = std::getenv("SWIFTNET_STEAL_THRESHOLD"))
-    {
-        int v = std::atoi(t);
-        steal_threshold_ = v < 0 ? 0 : v;
-    }
+    // Log the detected runtime + resolved config once, so the embedded
+    // auto-detected choices and the active knobs are transparent at startup.
+    detail::log_runtime(cfg.detected);
+    log_config(cfg);
 
     running_ = true;
     for (std::size_t i = 0; i < ncores_; ++i)
         engines_[i]->thread = std::thread([this, i] { run(*engines_[i]); });
 
-    SWIFTNET_LOG_INFO("scheduler online: {} per-core engines (steal={}, threshold={})",
-                      ncores_, steal_enabled_.load(std::memory_order_relaxed) ? 1 : 0, steal_threshold_);
+    SWIFTNET_LOG_INFO("scheduler online: {} per-core engines (steal={}, threshold={}, max_batch={}, min_idle={})",
+                      ncores_, steal_enabled_.load(std::memory_order_relaxed) ? 1 : 0,
+                      steal_threshold_, steal_max_batch_, steal_min_idle_);
 }
 
 void vthread_scheduler::stop()
@@ -185,13 +201,20 @@ void vthread_scheduler::add_listener(std::uint16_t port, int backlog,
 
 void vthread_scheduler::bind_core(std::size_t c)
 {
+    // Gate on detected support: false on Apple Silicon (KERN_NOT_SUPPORTED) and in
+    // containers/cgroups that deny sched_setaffinity. Never pretend to pin.
+    if (!detail::cached_runtime().pinning_supported)
+    {
+        (void)c;
+        return;
+    }
 #ifdef __linux__
     cpu_set_t cs;
     CPU_ZERO(&cs);
     CPU_SET(c, &cs);
     pthread_setaffinity_np(pthread_self(), sizeof(cs), &cs);
 #else
-    (void)c; // macOS/Apple Silicon: no true core pinning (KERN_NOT_SUPPORTED).
+    (void)c;
 #endif
 }
 
@@ -311,7 +334,22 @@ void vthread_scheduler::run(Engine &e)
 
         drain_inbox(e);    // cross-thread scheduled roots
         drain_resume(e);   // connections handed back after their offloaded compute ran
-        service_compute(e, /*idle=*/io_events == 0); // run/steal one compute task (valve)
+
+        // Track idle-engine count for the steal_min_idle gate (engine-local
+        // bookkeeping of a relaxed global counter; only matters when the valve is
+        // on and min_idle > 0).
+        const bool idle = (io_events == 0);
+        if (idle != e.counted_idle)
+        {
+            idle_engines_.fetch_add(idle ? 1 : -1, std::memory_order_relaxed);
+            e.counted_idle = idle;
+        }
+
+        // Run up to steal_max_batch compute tasks this turn (own first, then steal
+        // when idle). Default max_batch=1 reproduces the prior one-per-turn behavior.
+        for (int k = 0; k < steal_max_batch_; ++k)
+            if (!service_compute(e, idle))
+                break;
     }
 }
 
@@ -456,7 +494,7 @@ vthread_scheduler::ComputeTask *vthread_scheduler::steal_compute(Engine &thief)
     return nullptr;
 }
 
-void vthread_scheduler::service_compute(Engine &e, bool idle)
+bool vthread_scheduler::service_compute(Engine &e, bool idle)
 {
     const bool valve = steal_enabled_.load(std::memory_order_relaxed);
 
@@ -464,13 +502,13 @@ void vthread_scheduler::service_compute(Engine &e, bool idle)
     // touch the compute mutex. This keeps the pure-I/O path (no offload) free of
     // any per-iteration lock -- compute_depth is a relaxed atomic.
     if (e.compute_depth.load(std::memory_order_relaxed) == 0 && !(valve && idle))
-        return;
+        return false;
 
     // Busy engine + valve on: don't run compute now -- keep doing I/O and let an
     // idle thief take it. Exception: if the local backlog is large, run one
     // anyway so it can never starve when every engine is saturated.
     if (valve && !idle && e.compute_depth.load(std::memory_order_relaxed) < kComputeBacklogCap)
-        return;
+        return false;
 
     // Take one of our own tasks (near end) first.
     ComputeTask *t = nullptr;
@@ -484,10 +522,11 @@ void vthread_scheduler::service_compute(Engine &e, bool idle)
     }
     if (t)
         e.compute_depth.fetch_sub(1, std::memory_order_relaxed);
-    else if (valve && idle)
-        t = steal_compute(e); // local empty + idle: steal from a busy victim
+    else if (valve && idle &&
+             idle_engines_.load(std::memory_order_relaxed) >= steal_min_idle_)
+        t = steal_compute(e); // local empty + idle + enough idle capacity: steal
     if (!t)
-        return;
+        return false;
 
     g_pending_compute_.fetch_sub(1, std::memory_order_relaxed);
     if (t->fn)
@@ -508,6 +547,7 @@ void vthread_scheduler::service_compute(Engine &e, bool idle)
         if (owner->loop)
             owner->loop->wake();
     }
+    return true;
 }
 
 std::pmr::memory_resource *vthread_scheduler::local_resource(std::size_t engine)

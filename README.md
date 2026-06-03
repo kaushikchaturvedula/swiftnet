@@ -1,597 +1,226 @@
 # SwiftNet
 
-> **High-Performance C++ Networking Library**
-> 
-> *Sophisticated Virtual Thread System with Automatic Mounting/Unmounting*
+A high-performance C++20/23 coroutine web framework: an Express/Fastify-style API on top of a
+**per-core, shared-nothing, lock-free** runtime. Each CPU core runs one engine that owns its own
+connections, run queue, and I/O reactor — no global queues, no shared mutable state on the request
+hot path. The best I/O backend, SIMD path, and core-pinning for the machine are **auto-detected and
+embedded** (not knobs); everything that depends on your workload or deployment is a documented knob.
 
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg)](#cross-platform-support)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+> **Honesty note.** Performance is measured only on the hardware the authors can run: **Apple Silicon
+> (M1 Pro, arm64) with the kqueue backend.** The Linux (io_uring/epoll) and Windows (IOCP) backends are
+> implemented and functionally tested but **UNVERIFIED for throughput** — no speed is claimed for them.
+> [BENCHMARKS.md](BENCHMARKS.md) is the single source of truth for numbers and methodology.
 
-## 🚀 **Revolutionary Virtual Thread Architecture**
+---
 
-SwiftNet is a **cutting-edge C++ networking library** built with an **extremely sophisticated virtual thread system** featuring **automatic mounting and unmounting** on CPU cores. When a virtual thread encounters I/O operations, it's **automatically suspended and unmounted**, allowing another virtual thread to **immediately mount** on the same CPU core, maximizing CPU utilization and system throughput.
+## Install
 
-```cpp
-// Virtual threads automatically mount/unmount during I/O
-app.get("/user/:id", [](Request& req, Response& res) {
-    // This runs in a virtual thread mounted on a CPU core
-    std::string user_id = req.param("id");
-    
-    // When this I/O happens, virtual thread is UNMOUNTED
-    // Another virtual thread MOUNTS on the same CPU core
-    auto user_data = co_await async_database_lookup(user_id);
-    // I/O completes, original virtual thread RE-MOUNTS
-    
-    res.json({"user": user_data, "id": user_id});
-});
-```
-
-## 🏗️ **Architecture Overview**
-
-```mermaid
-graph TB
-    subgraph "SwiftNet High-Performance Architecture"
-        subgraph "Application Layer"
-            APP[Express.js-like API]
-            ROUTES[Routes & Middleware]
-            HANDLERS[Request Handlers]
-        end
-        
-        subgraph "Virtual Thread Scheduler"
-            SCHEDULER[Advanced Scheduler]
-            MOUNT[Mount/Unmount Engine]
-            WORKSTEAL[Work-Stealing Algorithm]
-            AFFINITY[CPU Affinity Manager]
-        end
-        
-        subgraph "CPU Cores"
-            CORE0["Core 0<br/>VThread A<br/>Queue: B,C"]
-            CORE1["Core 1<br/>VThread D<br/>Queue: E,F"]
-            CORE2["Core 2<br/>VThread G<br/>Queue: H,I"]
-            CORE3["Core 3<br/>VThread J<br/>Queue: K,L"]
-        end
-        
-        subgraph "I/O System"
-            IOQUEUE[I/O Wait Queue]
-            KQUEUE[kqueue/macOS]
-            IOURING[io_uring/Linux]
-            IOCP[IOCP/Windows]
-        end
-        
-        subgraph "Memory Management"
-            MPSC[Lock-free MPSC Queues]
-            POOLS[Per-Core Memory Pools]
-            ARENAS[Memory Arenas]
-        end
-    end
-    
-    APP --> ROUTES
-    ROUTES --> HANDLERS
-    HANDLERS --> SCHEDULER
-    
-    SCHEDULER --> MOUNT
-    SCHEDULER --> WORKSTEAL
-    SCHEDULER --> AFFINITY
-    
-    MOUNT --> CORE0
-    MOUNT --> CORE1
-    MOUNT --> CORE2
-    MOUNT --> CORE3
-    
-    WORKSTEAL -.-> CORE0
-    WORKSTEAL -.-> CORE1
-    WORKSTEAL -.-> CORE2
-    WORKSTEAL -.-> CORE3
-    
-    CORE0 --> IOQUEUE
-    CORE1 --> IOQUEUE
-    CORE2 --> IOQUEUE
-    CORE3 --> IOQUEUE
-    
-    IOQUEUE --> KQUEUE
-    IOQUEUE --> IOURING
-    IOQUEUE --> IOCP
-    
-    SCHEDULER --> MPSC
-    SCHEDULER --> POOLS
-    SCHEDULER --> ARENAS
-```
-
-## 🏗️ **Theoretical Advantages Over Node.js**
-
-SwiftNet's architecture is designed to address several fundamental limitations of Node.js:
-
-### **Multi-Core Utilization**
-- **SwiftNet**: True parallelism with virtual threads distributed across CPU cores
-- **Node.js**: Single-threaded event loop (main thread) with limited worker thread usage
-- **Advantage**: Full CPU utilization vs single-core bottleneck
-
-### **Memory Management**
-- **SwiftNet**: Lock-free data structures, per-core memory pools, no garbage collection
-- **Node.js**: V8 garbage collection with stop-the-world pauses
-- **Advantage**: Predictable memory allocation without GC pauses
-
-### **I/O Handling**
-- **SwiftNet**: Direct platform I/O (io_uring/kqueue/IOCP) with virtual thread suspension
-- **Node.js**: libuv abstraction layer with callback-based async
-- **Advantage**: Lower latency and higher throughput for I/O operations
-
-### **Context Switching**
-- **SwiftNet**: Lightweight virtual thread mounting/unmounting in microseconds
-- **Node.js**: Event loop scheduling and callback queues
-- **Advantage**: More efficient task switching and lower overhead
-
-### **Native Performance**
-- **SwiftNet**: Compiled C++ with zero-cost abstractions
-- **Node.js**: Interpreted JavaScript with JIT compilation
-- **Advantage**: Direct CPU instruction execution vs interpretation overhead
-
-> **Note**: These are theoretical advantages based on architectural differences. 
-> See the [Benchmarks](#benchmarks) section for actual performance comparisons.
-
-## 🧵 **Advanced Virtual Thread Features**
-
-### **Sophisticated Mounting/Unmounting System**
-
-```cpp
-// Virtual Thread Lifecycle:
-// 1. Created for incoming request
-// 2. MOUNTED on available CPU core
-// 3. Executes until I/O or completion
-// 4. UNMOUNTED during I/O operation
-// 5. Another virtual thread MOUNTS on same core
-// 6. I/O completes → original thread RE-MOUNTS
-// 7. Completion and cleanup
-```
-
-### **Key Features**
-
-- **🔥 Automatic Mounting/Unmounting**: Virtual threads seamlessly transition on/off CPU cores
-- **⚡ Work-Stealing Scheduler**: Advanced algorithm prevents core starvation
-- **🎯 CPU Affinity Optimization**: Intelligent core binding for cache locality
-- **🔄 I/O Suspension & Resumption**: Microsecond-level context switching
-- **⏱️ Preemptive Scheduling**: Time-sliced execution prevents blocking
-- **📊 Real-time Monitoring**: Comprehensive performance statistics
-
-## 🌐 **Cross-Platform High-Performance I/O**
-
-| Platform | I/O Backend | Performance |
-|----------|-------------|-------------|
-| **Linux** | `io_uring` + `epoll` fallback | Highest performance |
-| **macOS** | `kqueue` | Native BSD performance |
-| **Windows** | `IOCP` | Native Windows performance |
-
-```cpp
-// Platform detection and optimal backend selection
-#if defined(SWIFTNET_BACKEND_IOURING)
-    // Linux: io_uring for maximum performance
-#elif defined(SWIFTNET_BACKEND_KQUEUE)  
-    // macOS: kqueue for BSD optimization
-#elif defined(SWIFTNET_BACKEND_IOCP)
-    // Windows: IOCP for Windows optimization
-#endif
-```
-
-## 🚀 **Features**
-
-### **Modern C++20 Coroutines**
-- **`co_await` async I/O** with automatic virtual thread suspension
-- **Zero-copy operations** where possible
-- **Exception-safe** coroutine handling
-
-### **Express.js-like API**
-- **HTTP methods**: GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD
-- **Route parameters**: `/user/:id` with automatic extraction
-- **Middleware chains** with `next()` function
-- **JSON handling**: Automatic parsing and serialization
-- **Static file serving** with MIME type detection
-- **CORS support** built-in
-
-### **Enterprise-Grade Performance**
-- **Lock-free data structures** (MPSC queues)
-- **Per-core memory arenas** for optimal allocation
-- **Memory pools** to reduce allocation overhead
-- **Intelligent load balancing** across CPU cores
-
-## 📋 **Requirements**
-
-- **C++20** compatible compiler (GCC 10+, Clang 11+, MSVC 2019+)
-- **CMake 3.20+**
-- **Platform-specific dependencies**:
-  - **Linux**: `liburing` (optional, falls back to epoll)
-  - **macOS**: Native kqueue support (built-in)
-  - **Windows**: Native IOCP support (built-in)
-
-## 🛠️ **Installation**
-
-### **Quick Start**
+Requires a C++23 compiler (Clang ≥ 17 / GCC ≥ 13; tested on Apple Clang 21) and CMake ≥ 3.20.
+Dependencies are fetched/vendored automatically: nlohmann/json + Glaze (JSON), spdlog (logging),
+rapidyaml (config, vendored), doctest (tests), and liburing on Linux if present.
 
 ```bash
-git clone https://github.com/NeuralRevenant/swiftnet.git
-cd swiftnet
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
 ```
 
-### **CMake Options**
+On Apple Silicon, also pass `-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)"`.
 
-```bash
-# Enable jemalloc for better memory allocation
-cmake -DSWIFTNET_WITH_JEMALLOC=ON ..
+To use it from your own CMake project, add this repo via `add_subdirectory()` (or FetchContent) and
+link `swiftnet`.
 
-# Build examples and tests
-cmake -DBUILD_EXAMPLES=ON -DBUILD_TESTS=ON ..
+---
 
-# Debug build with full instrumentation
-cmake -DCMAKE_BUILD_TYPE=Debug ..
-```
+## Hello, world
 
-## 💻 **Usage Examples**
-
-### **Basic HTTP Server with Virtual Threads**
+Full source: [examples/hello.cpp](examples/hello.cpp) (built in CI as the `hello` target).
 
 ```cpp
 #include "swiftnet.hpp"
-
 using namespace swiftnet;
 
 int main() {
     SwiftNet app(8080);
-
-    // Each request runs in its own virtual thread
-    app.get("/", [](Request& req, Response& res) {
-        res.html("<h1>SwiftNet: High-Performance C++ Networking!</h1>");
+    app.get("/", [](Request&, Response& res) { res.text("Hello, World!"); });
+    app.get("/json", [](Request&, Response& res) {
+        Json j; j["message"] = "Hello, World!";
+        res.json(j);                 // dynamic JSON (nlohmann)
     });
-
-    // Virtual thread with I/O suspension/resumption
-    app.get("/user/:id", [](Request& req, Response& res) {
-        std::string user_id = req.param("id");
-        
-        // This I/O will suspend the virtual thread
-        // Another vthread mounts on this CPU core
-        auto user_data = co_await async_database_lookup(user_id);
-        
-        res.json({
-            {"user_id", user_id},
-            {"data", user_data},
-            {"processed_by", "virtual_thread_with_mounting"}
-        });
-    });
-
-    // Middleware with virtual thread support
-    app.use([](Request& req, Response& res, std::function<void()> next) {
-        std::cout << "Request: " << req.method() << " " << req.path() 
-                  << " (Virtual Thread: " << std::this_thread::get_id() << ")" 
-                  << std::endl;
-        next();
-    });
-
-    app.listen([]() {
-        std::cout << "SwiftNet server with advanced virtual threads running!" << std::endl;
-    });
-
-    return 0;
+    app.listen([]{ /* listening on :8080 */ });
 }
 ```
 
-### **Advanced Virtual Thread Control**
+## Typed JSON (Fastify/FastAPI/Spring-style)
+
+Define a plain struct — **Glaze** reflects it at compile time (no schema, no macros) and
+(de)serializes at native speed on the hot path. Full source:
+[examples/typed_json.cpp](examples/typed_json.cpp) (`typed_json` target).
 
 ```cpp
-// Get real-time scheduler statistics
-auto stats = vthread_scheduler::instance().get_stats();
-std::cout << "Virtual threads scheduled: " << stats.total_scheduled << std::endl;
-std::cout << "I/O suspensions: " << stats.total_io_suspended << std::endl;
-std::cout << "Work stolen: " << stats.work_stolen << std::endl;
+struct User { int id{}; std::string name; bool active{}; };
 
-// Schedule with specific CPU affinity
-vthread_scheduler::instance().schedule_with_affinity(my_vthread, 2);
+app.get("/users/sample", [](Request&, Response& res) {
+    res.json(User{1, "ada", true});          // typed serialize (Glaze)
+});
 
-// Monitor per-core execution
-for (size_t i = 0; i < stats.per_core_executed.size(); ++i) {
-    std::cout << "Core " << i << ": " << stats.per_core_executed[i] 
-              << " virtual threads executed" << std::endl;
-}
-```
-
-### **JSON API with Async Processing**
-
-```cpp
-app.post("/api/users", [](Request& req, Response& res) {
-    if (!req.is_json()) {
-        res.bad_request("Content-Type must be application/json");
-        return;
-    }
-    
-    try {
-        Json user_data = req.json();
-        
-        // Validation
-        if (!user_data.contains("name") || !user_data.contains("email")) {
-            res.bad_request("Missing required fields: name, email");
-            return;
-        }
-        
-        // Async database write (virtual thread suspends here)
-        auto user_id = co_await async_create_user(user_data);
-        
-        res.created({
-            {"id", user_id},
-            {"name", user_data["name"]},
-            {"email", user_data["email"]},
-            {"created_at", current_timestamp()},
-            {"virtual_thread_info", "suspended and resumed during I/O"}
-        });
-    } catch (const std::exception& e) {
-        res.bad_request("Invalid JSON: " + std::string(e.what()));
-    }
+app.post("/users", [](Request& req, Response& res) {
+    User u = req.body<User>();               // typed parse (Glaze); default-constructed on bad input
+    if (u.name.empty()) { res.bad_request("name is required"); return; }
+    res.status(201).json(u);
 });
 ```
 
-## 📚 **API Reference**
+`Json` (nlohmann) is still there for dynamic documents — `res.json(Json{...})` and `req.json()`. The
+typed `json<T>` overload is constrained so it never competes with the dynamic one or with `text()`.
 
-### **SwiftNet Class**
+## Async handlers and CPU offload
 
-#### **HTTP Methods**
-```cpp
-SwiftNet& get(const std::string& path, handler_t handler);
-SwiftNet& post(const std::string& path, handler_t handler);
-SwiftNet& put(const std::string& path, handler_t handler);
-SwiftNet& del(const std::string& path, handler_t handler);
-SwiftNet& patch(const std::string& path, handler_t handler);
-SwiftNet& options(const std::string& path, handler_t handler);
-SwiftNet& head(const std::string& path, handler_t handler);
-```
-
-#### **Middleware**
-```cpp
-SwiftNet& use(middleware_t middleware);
-SwiftNet& use(const std::string& path, middleware_t middleware);
-SwiftNet& cors(const std::string& origin = "*");
-SwiftNet& json(size_t limit = 1024 * 1024);
-SwiftNet& logger();
-```
-
-#### **Server Control**
-```cpp
-void listen(std::function<void()> callback = nullptr);
-void listen(uint16_t port, std::function<void()> callback = nullptr);
-void close();
-```
-
-### **Request Class**
+Handlers may be coroutines that `co_await` async I/O. For CPU-heavy work, `co_await
+swiftnet::offload(fn)` moves it to a **stealable compute task** so it doesn't block the engine's
+I/O-bound connections (see the [work-stealing valve](#work-stealing-valve)):
 
 ```cpp
-const std::string& method() const;
-const std::string& path() const;
-const std::string& body() const;
-std::string header(const std::string& name) const;
-std::string query(const std::string& name) const;
-std::string param(const std::string& name) const;
-bool is_json() const;
-Json json() const;
+app.get("/work", [](Request&, Response& res) -> vthread {
+    std::uint64_t acc = 0;
+    co_await swiftnet::offload([&]{ /* heavy compute */ });
+    Json j; j["acc"] = acc; res.json(j);
+    co_return;
+});
 ```
-
-### **Response Class**
-
-```cpp
-Response& status(int code);
-Response& header(const std::string& name, const std::string& value);
-Response& text(const std::string& content);
-Response& html(const std::string& content);
-Response& json(const Json& data);
-Response& file(const std::string& filepath);
-Response& redirect(const std::string& url, int code = 302);
-```
-
-## 🧪 **Testing & Examples**
-
-### **Run Performance Tests**
-
-```bash
-# Build and run comprehensive performance test
-cd build
-make performance_test
-./examples/performance_test
-
-# Expected output:
-# ✅ Virtual thread mounting on CPU cores
-# ✅ Automatic unmounting during I/O operations  
-# ✅ Work-stealing scheduler across N cores
-# ✅ Load balancing and CPU affinity optimization
-# ✅ Sophisticated I/O suspension and resumption
-# ✅ Zero CPU idle time - cores always busy
-```
-
-### **Run HTTP Server Examples**
-
-```bash
-# Basic HTTP server with virtual threads
-./examples/basic_server
-
-# Test with curl:
-curl http://localhost:8080/
-curl http://localhost:8080/user/123
-curl http://localhost:8080/stats
-```
-
-### **Load Testing**
-
-```bash
-# Test with wrk for high concurrency
-wrk -t12 -c1000 -d30s http://localhost:8080/user/123
-
-# Expected: High throughput with automatic virtual thread management
-```
-
-## 🔧 **Configuration**
-
-### **Virtual Thread Scheduler Tuning**
-
-```cpp
-// Set number of worker threads (default: hardware_concurrency)
-app.set_threads(8);
-
-// Configure TCP backlog
-app.set_backlog(2048);
-
-// Get scheduler instance for advanced control
-auto& scheduler = vthread_scheduler::instance();
-scheduler.start(8); // 8 cores
-```
-
-### **Memory Pool Configuration**
-
-```cpp
-// Per-core memory arenas (automatically configured)
-// 1MB per core by default, can be customized via scheduler
-```
-
-## 📊 **Monitoring & Observability**
-
-### **Real-time Statistics**
-
-```cpp
-auto stats = vthread_scheduler::instance().get_stats();
-
-// Core metrics
-stats.total_scheduled;      // Total virtual threads scheduled
-stats.total_io_suspended;   // Total I/O suspensions
-stats.total_resumed;        // Total resumptions from I/O
-stats.work_stolen;          // Work-stealing events
-stats.context_switches;     // Virtual thread context switches
-
-// Per-core breakdown
-for (size_t i = 0; i < stats.per_core_executed.size(); ++i) {
-    std::cout << "Core " << i << ": " << stats.per_core_executed[i] << std::endl;
-}
-```
-
-### **Built-in Endpoints**
-
-```cpp
-// Statistics endpoint (automatically available)
-GET /stats
-{
-  "scheduler_statistics": {
-    "total_scheduled": 100,
-    "total_io_suspended": 85,
-    "work_stolen": 12,
-    "context_switches": 156
-  },
-  "per_core_execution": [
-    {"core": 0, "executed": 25},
-    {"core": 1, "executed": 31},
-    {"core": 2, "executed": 22},
-    {"core": 3, "executed": 22}
-  ]
-}
-```
-
-## 🏆 **Benchmarks**
-
-### **Performance Testing**
-
-To validate the theoretical advantages of SwiftNet's virtual thread architecture, we conduct comprehensive benchmarks against Node.js using identical server implementations.
-
-- **Hardware**: Apple M1 Pro (10 cores), macOS 26, native arm64 builds.
-- **Tool**: [wrk](https://github.com/wg/wrk), HTTP/1.1 keep-alive, each server measured **in isolation** with a warm-up run.
-- **Compared**: SwiftNet vs **Node.js 22 / Express** vs **Spring Boot 3.4 (Java 23 virtual threads)**.
-
-#### **Benchmark Results**
-
-`GET /` at `wrk -t12 -c1000` (Requests/sec, p99 latency):
-
-| Server | Req/sec | p99 | vs Node |
-|---|--:|--:|--:|
-| Spring Boot (virtual threads) | 122,831 | 21.6 ms | 7.2× |
-| **SwiftNet** | **67,355** | **64.4 ms** | **3.9×** |
-| Node.js / Express | 17,086 | 643 ms¹ | 1.0× |
-
-¹ Node sheds connections at `-c1000` (single event loop saturated).
-
-**Honest takeaway:** SwiftNet beats Node.js/Express by **~3.4–3.9×** (and far better tail latency), but the mature **Spring Boot + JVM** stack is currently **~1.8× ahead** of SwiftNet. Full methodology, both endpoints, two concurrency levels, complete percentiles, analysis, and the headroom items that explain the Spring Boot gap are in **[BENCHMARKS.md](BENCHMARKS.md)**.
-
-#### **Running Benchmarks**
-
-```bash
-# Build SwiftNet (native arm64 release)
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 && cmake --build build -j
-
-# Reference servers
-(cd benchmark && npm install)                    # Node.js / Express
-(cd benchmark/springboot && gradle bootJar)      # Spring Boot (Java 21+)
-
-# SwiftNet vs Node.js                            ./benchmark/run_comparison.sh
-# SwiftNet vs Node.js vs Spring Boot (deep run)  T=12 C=1000 D=20s ./benchmark/bench_all.sh
-```
-
-## 🧠 **Advanced Concepts**
-
-### **Virtual Thread Lifecycle**
-
-```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│   CREATED   │───▶│   MOUNTED    │───▶│  EXECUTING  │
-└─────────────┘    └──────────────┘    └─────────────┘
-                                              │
-┌─────────────┐    ┌──────────────┐          │ I/O
-│ COMPLETED   │◀───│   UNMOUNTED  │◀─────────┘
-└─────────────┘    └──────────────┘
-       │                   │
-       ▼                   ▼ I/O Complete
-   [CLEANUP]         [RE-MOUNTED]
-```
-
-### **Work-Stealing Algorithm**
-
-```cpp
-// Pseudo-code for work-stealing
-if (local_queue.empty()) {
-    for (int attempts = 0; attempts < 4; ++attempts) {
-        victim_core = random() % num_cores;
-        if (victim_core != current_core) {
-            if (auto stolen_task = victim_queue.try_pop()) {
-                mount_vthread(stolen_task, current_core);
-                execute_vthread(stolen_task);
-                return true;
-            }
-        }
-    }
-}
-```
-
-### **Development Setup**
-
-```bash
-git clone https://github.com/NeuralRevenant/swiftnet.git
-cd swiftnet
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON ..
-make -j$(nproc)
-./tests/swiftnet_tests
-```
-
-## 📄 **License**
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 **Acknowledgments**
-
-- **C++20 Coroutines** for enabling elegant async/await syntax
-- **io_uring**, **kqueue**, and **IOCP** for high-performance I/O
-- **Work-stealing** algorithms from academic research
-- **Lock-free data structures** for scalable concurrency
 
 ---
 
-<div align="center">
+## Architecture: per-core, shared-nothing, lock-free
 
-**🚀 SwiftNet: High-Performance C++ Networking Library 🚀**
+This is **how SwiftNet works**, not a mode you select — there is no shared global-queue scheduler and
+no toggle for one.
 
-*Built with ❤️ and sophisticated virtual thread technology*
+- **One engine per core.** Each engine is a pinned thread that fuses the I/O reactor with the worker:
+  it owns its own event loop, its own run queue, and the connections it accepts.
+- **Kernel connection sharding via `SO_REUSEPORT`** — every engine has its own listener, so accepts
+  spread across cores with no shared accept lock.
+- **Connections are pinned.** A connection's coroutine, its fds, and its pending I/O all live on the
+  engine that accepted it and always resume there, so the per-request path takes **no locks**.
+- **Cross-thread work** (e.g. `schedule()` from another thread) is injected through a lock-free MPSC
+  inbox and drained by the owning engine.
+- **I/O coroutines are never stolen.** Only explicit compute tasks (`offload`) are stealable — moving a
+  pinned I/O coroutine would arm the wrong engine's reactor.
 
-• [Examples](examples/)
+Routing uses a compiled **radix tree** (static / `:param` / `*`), not per-request regex.
 
-</div> 
+---
+
+## Auto-detection (embedded, not overridable)
+
+At startup SwiftNet detects the OS, kernel, CPU arch, core topology, and available kernel/CPU features,
+then **embeds the universally-best choice** for that machine and logs it. These are not knobs —
+exposing them would only invite misconfiguration. Detection **fails safe** to the most portable correct
+option.
+
+| Machine class | I/O backend | SIMD | Core pinning |
+|---|---|---|---|
+| Linux, io_uring probe OK (kernel + liburing + not sandboxed) | **io_uring** | NEON (arm64) / AVX2·SSE2 (x86) | yes (if permitted) |
+| Linux, io_uring probe fails (old kernel / seccomp / container) | **epoll** | NEON / AVX2·SSE2 | yes (if permitted) |
+| macOS (Apple Silicon / Intel) | **kqueue** | NEON / AVX2·SSE2 | **no** — `KERN_NOT_SUPPORTED` (never faked) |
+| Windows | **IOCP** | AVX2·SSE2 | yes |
+| anything inconclusive | **epoll / scalar** | scalar | no |
+
+The io_uring choice comes from an **actual `io_uring_queue_init` probe**, not a version guess, so a
+container whose seccomp policy blocks io_uring transparently falls back to epoll. The selected backend
+is logged at startup with a `VERIFIED`/`UNVERIFIED` tag, e.g.:
+
+```
+SwiftNet runtime: os=macOS (25.5.0) arch=arm64 cores=10 logical/10 physical
+  topology: P-cores=8 E-cores=2
+  backend: kqueue [VERIFIED]   simd: NEON
+  pinning: DISABLED (macOS: KERN_NOT_SUPPORTED)
+SwiftNet config: engines=10 port=8080 backlog=1024
+  valve: OFF (threshold=1 max_batch=1 min_idle=0)   limits: max_header=65536B max_body=8388608B  log_level=info
+```
+
+---
+
+## Configuration
+
+Precedence: **built-in defaults → programmatic (code) → YAML file → environment variables.**
+**Environment always wins.** YAML is optional (path from `SWIFTNET_CONFIG`, else `./swiftnet.yaml`);
+a missing file is skipped and a malformed one is logged and ignored (never crashes).
+
+| Knob | Env var | YAML key | Default | Range | Platform |
+|---|---|---|---|---|---|
+| Engine count | `SWIFTNET_ENGINES` | `engines` | all logical cores | 1..logical | all |
+| Listen port | `SWIFTNET_PORT` | `port` | 8080 | 1..65535 | all |
+| Accept backlog | `SWIFTNET_BACKLOG` | `backlog` | 1024 | ≥1 | all |
+| Work-steal valve | `SWIFTNET_STEAL` | `steal` | off | 0/1 | all |
+| Steal threshold (victim depth) | `SWIFTNET_STEAL_THRESHOLD` | `steal_threshold` | 1 | ≥0 | all |
+| Steal max batch / turn | `SWIFTNET_STEAL_MAX_BATCH` | `steal_max_batch` | 1 | ≥1 | all |
+| Min idle engines before stealing | `SWIFTNET_STEAL_MIN_IDLE` | `steal_min_idle` | 0 | 0..engines | all |
+| Max request header bytes | `SWIFTNET_MAX_HEADER_BYTES` | `max_header_bytes` | 65536 | 1KiB..1MiB | all |
+| Max request body bytes | `SWIFTNET_MAX_BODY_BYTES` | `max_body_bytes` | 8 MiB | 0..2GiB | all |
+| Log level | `SWIFTNET_LOG_LEVEL` | `log_level` | info | trace/debug/info/warn/error | all |
+| io_uring provided buffers | `SWIFTNET_IOURING_PROVIDED_BUFFERS` | `iouring_provided_buffers` | off | 0/1 | Linux (reserved, UNVERIFIED) |
+| I/O backend · SIMD · pinning | — | — | **auto-detected** | — | embedded (logged, not overridable) |
+
+Example `swiftnet.yaml`:
+
+```yaml
+engines: 8
+port: 8080
+backlog: 1024
+steal: false
+steal_threshold: 2
+max_body_bytes: 1048576
+log_level: info
+```
+
+Programmatic seeds (overridden by YAML/env): `SwiftNet app(port); app.set_threads(n); app.set_backlog(b);`
+
+---
+
+## Work-stealing valve
+
+Off by default. The per-core model wins on cache locality under balanced load, but under **imbalance**
+(one engine buried in CPU-heavy `offload` work while others sit idle) that advantage erodes — so the
+valve lets an idle engine **steal a compute task** off a busy one. It is **compute-only**; pinned I/O
+is never moved. Knobs: `steal` (on/off), `steal_threshold` (victim depth before stealing),
+`steal_max_batch` (tasks run per engine turn), `steal_min_idle` (idle engines required before
+stealing). Honest framing: the valve **redistributes spare capacity, it does not create it** — its
+benefit shrinks as all cores get busy. Measured OFF/ON/INLINE deltas are in
+[BENCHMARKS.md §4](BENCHMARKS.md) (it relieves light-connection tail latency dramatically *given*
+offload; it cannot help work that runs inline in a pinned coroutine).
+
+---
+
+## Verified vs unverified (per platform/backend)
+
+| Platform / backend | Status | What's verified |
+|---|---|---|
+| **macOS / kqueue** (Apple Silicon) | ✅ **Measured** | All BENCHMARKS.md numbers; ctest; ThreadSanitizer-clean under load |
+| **Linux / io_uring** | ⚙️ Functional, **throughput UNVERIFIED** | Compiles + full test suite + live requests in a Linux container; per-engine timers + eventfd wake + `COOP_TASKRUN`. Multishot accept / provided buffers are documented future work |
+| **Linux / epoll** | ⚙️ Functional, **throughput UNVERIFIED** | Auto-selected when io_uring is unavailable; compiles + test suite + live requests in a container |
+| **Windows / IOCP** | 🚧 **Skeleton, UNVERIFIED** | Compiles as a shape behind the backend interface; a real `OVERLAPPED` + `WSARecv/WSASend` completion path (and the Windows `tcp_socket` integration) is **not yet done** — the authors have no Windows toolchain to compile or run it |
+
+No throughput/latency number is reported for any backend except kqueue. See
+[BENCHMARKS.md](BENCHMARKS.md).
+
+---
+
+## Building & testing
+
+```bash
+# Release (default)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+ctest --test-dir build --output-on-failure          # unit, detect, config, simd, glaze, integration
+
+# Sanitizers (gate the concurrency-critical paths)
+cmake -S . -B build-tsan -DSWIFTNET_SANITIZE=thread  && cmake --build build-tsan -j
+cmake -S . -B build-asan -DSWIFTNET_SANITIZE=address && cmake --build build-asan -j
+```
+
+CMake options: `SWIFTNET_NATIVE` (host-CPU tuning, default ON — auto-skipped if the toolchain rejects
+it), `SWIFTNET_LTO` (default OFF), `SWIFTNET_SANITIZE` (`none|address|thread|undefined`),
+`SWIFTNET_BUILD_EXAMPLES`, `SWIFTNET_BUILD_TESTS`.
+
+Benchmark harness and the off-host load-generator kit live in [benchmark/](benchmark/); the Linux
+io_uring/epoll functional check runs in Docker (see [BENCHMARKS.md](BENCHMARKS.md) → Reproduce).

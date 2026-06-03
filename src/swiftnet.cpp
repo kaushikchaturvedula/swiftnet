@@ -470,10 +470,22 @@ void SwiftNet::listen(uint16_t port, std::function<void()> callback)
         // Register WebSocket session routes with the http server.
         for (const auto &[path, handler] : ws_routes_)
             server_->ws_route(path, handler);
-        server_->start(threads_);
-        
-        Logger::instance().info("SwiftNet server listening on port " + std::to_string(port_) + 
-                               " with " + std::to_string(threads_) + " threads");
+
+        // Resolve the layered config (built-in defaults, seeded with the
+        // programmatic port/engines/backlog, then YAML file, then env -- env wins),
+        // and start the server from it. This is the single config-load point on the
+        // framework path; the startup banner (runtime + config) is logged inside.
+        Config base;
+        base.port = port_;
+        base.backlog = backlog_;
+        if (threads_)
+            base.engines = threads_;
+        Config cfg = load_config(base);
+        port_ = cfg.port; // env/YAML may have overridden
+        server_->start(cfg);
+
+        Logger::instance().info("SwiftNet server listening on port " + std::to_string(port_) +
+                               " with " + std::to_string(cfg.resolved_engines()) + " engines");
         
         if (callback) {
             callback();

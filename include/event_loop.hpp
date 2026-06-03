@@ -1,102 +1,64 @@
 #pragma once
-#include "detail/os_backend.hpp"
-#include <cstdint>
+#include "detail/backend/iface.hpp"
+#include <memory>
 
 namespace swiftnet
 {
 
-    // A single readiness/completion event reported by the reactor.
-    //
-    // `token` is an opaque value supplied at arm()/arm_timer() time and handed
-    // straight back here. SwiftNet uses the suspended coroutine handle's address
-    // as the token, so the reactor can resume the right virtual thread with no
-    // side table. A token of 0 is reserved for the internal wake() nudge.
-    struct io_event
-    {
-        std::uint64_t token = 0;
-        std::uint32_t mask = 0; // combination of event_mask values
-        int res = 0;            // result hint (bytes for io_uring/IOCP; data for kqueue)
-    };
-
-    enum event_mask : std::uint32_t
-    {
-        READABLE = 1u << 0,
-        WRITABLE = 1u << 1
-    };
-
-    // Normalize a libc poll() bitset (POLLIN / POLLOUT) into the canonical
-    // event_mask. This is the ONE place POLL* constants are interpreted, so the
-    // rest of the runtime only ever deals in READABLE/WRITABLE.
-    constexpr std::uint32_t mask_from_poll(unsigned poll_bits) noexcept
-    {
-        std::uint32_t m = 0;
-        if (poll_bits & 0x001u) // POLLIN
-            m |= READABLE;
-        if (poll_bits & 0x004u) // POLLOUT
-            m |= WRITABLE;
-        return m;
-    }
-
-    // Cross-platform reactor: kqueue (macOS), io_uring (Linux), IOCP (Windows).
+    // Cross-platform reactor façade. Owns exactly one detail::reactor_backend,
+    // chosen at construction: per platform at compile time (kqueue on macOS, IOCP
+    // on Windows) and, on Linux, per machine at runtime (io_uring when the kernel
+    // actually supports it, else epoll -- see detail/runtime_detect.hpp). The
+    // public API below is unchanged from the original single-class event_loop, so
+    // io_awaitable and vthread_scheduler are untouched by the backend split.
     //
     // Everything is one-shot: arm() registers a watch that fires exactly once and
     // is then removed by the kernel. To wait on the same fd again, re-arm. This
     // matches the "co_await arms once, resume once" model of the virtual-thread
-    // runtime and removes the need for an explicit del() after every completion.
+    // runtime.
     //
     // ============================ BACKEND STATUS ============================
     //  kqueue  (macOS/BSD)  : VERIFIED. Primary, fully exercised target. All
-    //                         benchmarks in BENCHMARKS.md were measured on this
-    //                         backend (Apple Silicon / arm64).
-    //  io_uring (Linux)     : IMPLEMENTED but UNVERIFIED. Careful, idiomatic, but
-    //                         deliberately *readiness-based* (io_uring_prep_poll_add,
-    //                         like epoll) -- it does NOT yet use modern io_uring
-    //                         (multishot accept/recv, provided buffers, DEFER_TASKRUN,
-    //                         SEND_ZC). Not benchmarked on real hardware; no speed is
-    //                         claimed. The timer path uses a process-global mutex/map
-    //                         (a known wart vs the per-engine shared-nothing model).
-    //  IOCP    (Windows)    : SKELETON / UNVERIFIED. Readiness arm() is a no-op,
-    //                         timers use a throwaway thread, and wait() reports
-    //                         placeholder readiness. A real port needs OVERLAPPED +
-    //                         WSARecv/WSASend completion integration. Compiles as a
-    //                         shape; NOT a working high-performance backend yet.
+    //                         benchmarks in BENCHMARKS.md were measured here
+    //                         (Apple Silicon / arm64).
+    //  io_uring (Linux)     : IMPLEMENTED, UNVERIFIED for throughput. Modernized
+    //                         (per-engine timers, eventfd wake, SINGLE_ISSUER/
+    //                         DEFER_TASKRUN with graceful downgrade, multishot
+    //                         accept). Provided-buffers/multishot-recv are gated
+    //                         OFF by default. Functionally tested on Linux; no
+    //                         speed is claimed.
+    //  epoll   (Linux)      : IMPLEMENTED, UNVERIFIED for throughput. EPOLLONESHOT
+    //                         fallback used when the io_uring probe fails (old
+    //                         kernel / seccomp / container). Functionally tested.
+    //  IOCP    (Windows)    : IMPLEMENTED, UNVERIFIED. Real OVERLAPPED completion
+    //                         (WSARecv/WSASend). Compiles; not benchmarked.
     //
-    // Rule: never report or imply throughput/latency for io_uring or IOCP. Only the
-    // kqueue numbers are real. See BENCHMARKS.md.
+    // Rule: never report or imply throughput/latency for any backend except kqueue.
+    // See BENCHMARKS.md.
     // ========================================================================
     class event_loop
     {
     public:
-        event_loop();
+        event_loop(); // selects the backend from the cached runtime_info
         ~event_loop();
 
         event_loop(const event_loop &) = delete;
         event_loop &operator=(const event_loop &) = delete;
 
-        // Arm a one-shot readiness watch on `fd` for `mask`, tagged with `token`.
-        void arm(int fd, std::uint32_t mask, std::uint64_t token);
+        void arm(int fd, std::uint32_t mask, std::uint64_t token) { b_->arm(fd, mask, token); }
+        void arm_timer(std::uint64_t token, int ms) { b_->arm_timer(token, ms); }
+        void cancel(int fd, std::uint32_t mask) { b_->cancel(fd, mask); }
+        int wait(io_event *ev, int max, int timeout_ms) { return b_->wait(ev, max, timeout_ms); }
+        void wake() { b_->wake(); }
 
-        // Arm a one-shot timer firing after `ms` milliseconds, tagged `token`.
-        void arm_timer(std::uint64_t token, int ms);
-
-        // Best-effort disarm of an outstanding readiness watch (e.g. on close).
-        void cancel(int fd, std::uint32_t mask);
-
-        // Block until >=1 event is ready or `timeout_ms` elapses (<0 = forever).
-        // Fills up to `max` io_event entries; returns the count (0 on timeout).
-        int wait(io_event *ev, int max, int timeout_ms);
-
-        // Unblock a concurrent wait() (used to stop the reactor on shutdown).
-        void wake();
+        // Multishot accept if the backend supports it (io_uring); false otherwise.
+        bool arm_accept_multishot(int listen_fd, std::uint64_t token)
+        {
+            return b_->arm_accept_multishot(listen_fd, token);
+        }
 
     private:
-#if defined(SWIFTNET_BACKEND_IOURING)
-        struct io_uring *ring_;
-#elif defined(SWIFTNET_BACKEND_KQUEUE)
-        int kq_;
-#elif defined(SWIFTNET_BACKEND_IOCP)
-        void *iocp_;
-#endif
+        std::unique_ptr<detail::reactor_backend> b_;
     };
 
 }

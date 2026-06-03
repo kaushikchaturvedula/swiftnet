@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(SwiftNet VERSION 1.0.0 LANGUAGES CXX)
 
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 20)
+# Set C++ standard. C++23 is required by Glaze (the fast typed-JSON path); clang/gcc
+# support it fully and it is a superset of the C++20 the coroutine/pmr code used.
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -116,6 +117,26 @@ if(NOT spdlog_FOUND)
     FetchContent_MakeAvailable(spdlog)
 endif()
 
+# Glaze: header-only, compile-time-reflection JSON for the typed fast path
+# (res.json(struct) / req.body<T>()). Requires C++23. nlohmann::json is kept for
+# dynamic/convenience JSON. Pinned for reproducibility + clang21 compatibility.
+find_package(glaze QUIET)
+if(NOT glaze_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        glaze
+        GIT_REPOSITORY https://github.com/stephenberry/glaze.git
+        GIT_TAG v7.7.1
+    )
+    FetchContent_MakeAvailable(glaze)
+endif()
+
+# rapidyaml for the YAML config file. Vendored as the official amalgamated single
+# header (third_party/rapidyaml/ryml_all.hpp) to avoid the c4core submodule +
+# separate-library build; exactly one TU (src/config.cpp) defines
+# RYML_SINGLE_HDR_DEFINE_NOW. See third_party/rapidyaml/README.md.
+set(SWIFTNET_RYML_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rapidyaml)
+
 # Platform-specific libraries
 if(SWIFTNET_PLATFORM_LINUX)
     # Try to find liburing for Linux
@@ -131,20 +152,29 @@ endif()
 # SwiftNet library sources
 set(SWIFTNET_SOURCES
     src/swiftnet.cpp
+    src/config.cpp
     src/vthread.cpp
     src/vthread_scheduler.cpp
     src/io_awaitable.cpp
     src/event_loop.cpp
+    src/detail/backend/kqueue_backend.cpp
+    src/detail/backend/iouring_backend.cpp
+    src/detail/backend/epoll_backend.cpp
+    src/detail/backend/iocp_backend.cpp
     src/net/tcp_socket.cpp
     src/net/acceptor.cpp
     src/http/http_server.cpp
     src/ws/websocket.cpp
     src/detail/platform_utils.cpp
+    src/detail/runtime_detect.cpp
 )
 
 # SwiftNet library headers
 set(SWIFTNET_HEADERS
     include/swiftnet.hpp
+    include/config.hpp
+    include/json.hpp
+    include/detail/simd.hpp
     include/vthread.hpp
     include/vthread_scheduler.hpp
     include/io_awaitable.hpp
@@ -154,6 +184,8 @@ set(SWIFTNET_HEADERS
     include/http/http_server.hpp
     include/ws/websocket.hpp
     include/detail/os_backend.hpp
+    include/detail/backend/iface.hpp
+    include/detail/runtime_detect.hpp
     include/detail/mpsc_queue.hpp
     include/detail/work_queue.hpp
     include/detail/log.hpp
@@ -164,16 +196,19 @@ set(SWIFTNET_HEADERS
 add_library(swiftnet STATIC ${SWIFTNET_SOURCES} ${SWIFTNET_HEADERS})
 
 # Set include directories
-target_include_directories(swiftnet 
-    PUBLIC 
+target_include_directories(swiftnet
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${SWIFTNET_RYML_INCLUDE}   # vendored rapidyaml, used only by src/config.cpp
 )
 
 # Link libraries
-target_link_libraries(swiftnet 
-    PUBLIC 
+target_link_libraries(swiftnet
+    PUBLIC
         Threads::Threads
+        glaze::glaze            # header-only typed JSON; used in public headers (json.hpp)
     PRIVATE
         nlohmann_json::nlohmann_json
         spdlog::spdlog
