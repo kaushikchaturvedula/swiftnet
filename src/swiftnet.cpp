@@ -603,34 +603,21 @@ vthread SwiftNet::handle_request_async(const http::request &req, http::response 
 
 bool SwiftNet::run_middlewares(Request &req, Response &res)
 {
+    // Collect the GLOBAL applicable chain (unchanged behavior): global middlewares
+    // then prefix-matching path middlewares, in registration order.
     std::vector<middleware_t> applicable_middlewares;
-
-    // Global middlewares
     applicable_middlewares.insert(applicable_middlewares.end(),
                                   middlewares_.begin(), middlewares_.end());
-
-    // Path-specific middlewares
     for (const auto &[path, middleware] : path_middlewares_) {
         if (req.path().find(path) == 0) {
             applicable_middlewares.push_back(middleware);
         }
     }
 
-    // Execute the chain. Each middleware decides whether to call next(); if the
-    // chain runs to the end we "reached" the handler. A middleware that does not
-    // call next() short-circuits the request (e.g. CORS preflight, auth reject).
-    bool reached_handler = false;
-    size_t index = 0;
-    std::function<void()> next = [&]() {
-        if (index < applicable_middlewares.size()) {
-            applicable_middlewares[index++](req, res, next);
-        } else {
-            reached_handler = true;
-        }
-    };
-
-    next();
-    return reached_handler;
+    // Execute via the shared curried-next() runner. A middleware that does not call
+    // next() short-circuits the request; reaching the end means the handler should run.
+    // (Scoped plugin chains use the same detail::run_chain, composed at registration.)
+    return detail::run_chain(applicable_middlewares, req, res);
 }
 
 // Utility functions

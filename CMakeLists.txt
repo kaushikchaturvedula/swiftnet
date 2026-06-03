@@ -176,6 +176,7 @@ set(SWIFTNET_HEADERS
     include/json.hpp
     include/schema.hpp
     include/detail/validate.hpp
+    include/scope.hpp
     include/detail/simd.hpp
     include/vthread.hpp
     include/vthread_scheduler.hpp

@@ -196,6 +196,29 @@ namespace swiftnet
         return std::nullopt;
     }
 
+    namespace detail
+    {
+        // Run an already-collected middleware list via the Express-style curried next()
+        // chain. Returns true if it ran to the end (the handler should run), false if a
+        // middleware short-circuited (did not call next()). Shared verbatim by the global
+        // path (SwiftNet::run_middlewares) and by scoped plugin chains (scope.hpp) so both
+        // behave identically.
+        inline bool run_chain(const std::vector<middleware_t> &chain, Request &req, Response &res)
+        {
+            bool reached = false;
+            std::size_t i = 0;
+            std::function<void()> next = [&]()
+            {
+                if (i < chain.size())
+                    chain[i++](req, res, next);
+                else
+                    reached = true;
+            };
+            next();
+            return reached;
+        }
+    } // namespace detail
+
     // Route structure (matching is done by the compiled radix Router, not regex).
     struct Route
     {
@@ -203,6 +226,13 @@ namespace swiftnet
         std::string pattern;
         handler_t handler;
     };
+
+    // Options for app.plugin() (see scope.hpp).
+    struct PluginOpts
+    {
+        std::string prefix; // e.g. "/v1"; empty inherits the parent prefix unchanged
+    };
+    class Scope; // registration-time plugin scope (defined in scope.hpp)
 
     // SwiftNet class
     class SwiftNet
@@ -234,6 +264,14 @@ namespace swiftnet
         SwiftNet &use(const std::string &path, middleware_t middleware);
         // Register async middleware (runs before routing; may co_await).
         SwiftNet &use_async(async_middleware_t middleware);
+
+        // Register a plugin under an encapsulated scope (see scope.hpp). The plugin
+        // function receives a Scope on which it registers routes / scoped middleware /
+        // typed decorators (inherited by children, overridable, isolated from siblings).
+        // Registration-time only -- must be called before listen(); adds no per-request
+        // overhead. Defined in scope.hpp (needs the complete Scope type).
+        template <class Fn>
+        SwiftNet &plugin(Fn &&fn, PluginOpts opts = {});
 
         // Static files
         SwiftNet &static_files(const std::string &path, const std::string &root);
@@ -298,6 +336,11 @@ namespace swiftnet
                 };
             }
         }
+
+        // scope.hpp composes scoped routes/middleware and registers them via add_route +
+        // make_handler; PluginTestAccess is a test-only seam to resolve composed handlers.
+        friend class Scope;
+        friend struct PluginTestAccess;
     };
 
     // Utility functions

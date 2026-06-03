@@ -20,6 +20,7 @@ swiftnet_add_test(swiftnet_config_tests test_config.cpp config)
 swiftnet_add_test(swiftnet_simd_tests test_simd.cpp simd)
 swiftnet_add_test(swiftnet_glaze_tests test_glaze.cpp glaze)
 swiftnet_add_test(swiftnet_validate_tests test_validate.cpp validate)
+swiftnet_add_test(swiftnet_plugin_tests test_plugin.cpp plugin)
 
 swiftnet_add_test(swiftnet_integration_tests test_integration.cpp integration)
 set_tests_properties(integration PROPERTIES TIMEOUT 60)

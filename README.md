@@ -130,6 +130,57 @@ On failure `bind<T>()` responds **400** with all violations collected:
             {"field":"email","rule":"pattern","message":"email does not match required pattern"}]}
 ```
 
+## Plugins & encapsulation (Fastify-style)
+
+Group related routes behind a prefix, give them their own middleware, and share typed state — all
+*encapsulated* so siblings can't see each other. `app.plugin(fn, {prefix})` hands your function a
+`Scope` to register on:
+
+```cpp
+#include "scope.hpp"
+
+app.use(corsMiddleware);                              // root/global: applies to ALL routes
+
+app.plugin([](swiftnet::Scope& v1) {
+    v1.decorate<std::shared_ptr<Db>>("db", openDb()); // scoped typed state
+    v1.use(requireAuth);                              // scoped middleware: /v1/* only
+
+    auto db = v1.get<std::shared_ptr<Db>>("db");      // read at registration, capture into handlers
+    v1.get("/users", [db](Request&, Response& res) { res.text((*db)->query()); }); // -> /v1/users
+
+    v1.plugin([](swiftnet::Scope& admin) {            // nested child scope
+        admin.use(requireAdmin);                      // /v1/admin/* runs requireAuth THEN requireAdmin
+        admin.decorate<std::shared_ptr<Db>>("db", openAdminDb()); // overrides the parent's "db"
+        admin.get("/stats", /* ... */);               // -> /v1/admin/stats
+    }, {.prefix = "/admin"});
+}, {.prefix = "/v1"});
+
+app.plugin([](swiftnet::Scope& v2) {
+    auto db = v2.get<std::shared_ptr<Db>>("db");      // == nullptr: a sibling can't see /v1's "db"
+    v2.get("/ping", /* ... */);                       // -> /v2/ping, no auth (v2 added none)
+}, {.prefix = "/v2"});
+```
+
+| Concept | Verb | Encapsulation rule |
+|---|---|---|
+| Scoped routes | `s.get/post/put/del/patch/options/head(path, h)` | registered at `prefix + path` in the global radix router |
+| Scoped middleware | `s.use(mw)` | runs for this scope's routes **and its children**, in `root → … → this` order; never for siblings/parents |
+| Typed decorators | `s.decorate<T>("k", v)` / `s.get<T>("k")` | a child **inherits** parent decorators, may **override** locally; **siblings are isolated** |
+| Nested plugin | `s.plugin(fn, {prefix})` | a child scope; prefixes compose (`/v1` + `/admin` → `/v1/admin`) |
+
+**Zero per-request overhead.** A route's scoped middleware chain is resolved and composed into its
+handler **at registration**, then stored in the same router every other route uses — the per-request
+hot path (routing, dispatch) is unchanged, and routes outside a scope are untouched. Global `app.use`
+middleware still runs outermost (it wraps scoped middleware). A prefix-only plugin with no middleware
+is byte-for-byte identical to a hand-registered route.
+
+> ⚠️ **Decorators are read-only after registration.** `get<T>("k")` returns
+> `std::shared_ptr<const T>`, so a handler that captures a decorator cannot mutate shared state across
+> engines (preserving the lock-free, no-shared-mutable-state model). A `get<T>` for a missing key — or
+> one stored under a *different* type — returns `nullptr` (a safe miss, never UB; debug builds log it).
+> Read decorators at registration and **capture them into your handler closures** (as above); that is
+> the access path, and it keeps lookups off the hot path. Call `plugin()` **before** `listen()`.
+
 ## Async handlers and CPU offload
 
 Handlers may be coroutines that `co_await` async I/O. For CPU-heavy work, `co_await
