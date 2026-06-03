@@ -1,7 +1,7 @@
 # SwiftNet
 
-A high-performance C++20/23 coroutine web framework: an Express/Fastify-style API on top of a
-**per-core, shared-nothing, lock-free** runtime. Each CPU core runs one engine that owns its own
+**Build fast HTTP APIs in modern C++.** SwiftNet is a C++23 coroutine web framework with an
+Express/Fastify-style API, built on a **per-core, shared-nothing, lock-free** runtime. Each CPU core runs one engine that owns its own
 connections, run queue, and I/O reactor — no global queues, no shared mutable state on the request
 hot path. The best I/O backend, SIMD path, and core-pinning for the machine are **auto-detected and
 embedded** (not knobs); everything that depends on your workload or deployment is a documented knob.
@@ -48,6 +48,7 @@ int main() {
         res.json(j);                 // dynamic JSON (nlohmann)
     });
     app.listen([]{ /* listening on :8080 */ });
+    return 0;
 }
 ```
 
@@ -84,25 +85,26 @@ don't call `validate`/`bind` are on the unchanged hot path.
 
 ```cpp
 #include "schema.hpp"
-struct User { std::string name; int age{}; std::string email; std::string role;
-              std::optional<std::string> nickname; };
+// `Signup` here is its own illustrative type — unrelated to the `User` in the typed-JSON section above.
+struct Signup { std::string name; int age{}; std::string email; std::string role;
+                std::optional<std::string> nickname; };
 
-template <> struct swiftnet::schema<User> {
+template <> struct swiftnet::schema<Signup> {
     static constexpr auto rules = swiftnet::rules(
-        swiftnet::field<&User::name>(required{}, len(1, 50)),
-        swiftnet::field<&User::age>(range(0, 150)),
-        swiftnet::field<&User::email>(pattern("^[^@]+@[^@]+$")),
-        swiftnet::field<&User::role>(one_of("admin", "user", "guest")),
-        swiftnet::field<&User::nickname>(required{}, max_len(20)));   // optional member
+        swiftnet::field<&Signup::name>(len(1, 50)),                   // non-optional: required{} would be a no-op
+        swiftnet::field<&Signup::age>(range(0, 150)),
+        swiftnet::field<&Signup::email>(pattern("^[^@]+@[^@]+$")),
+        swiftnet::field<&Signup::role>(one_of("admin", "user", "guest")),
+        swiftnet::field<&Signup::nickname>(required{}, max_len(20))); // std::optional<T> — required{} works here
 };
 
-app.post("/users", [](Request& req, Response& res) {
-    auto u = req.bind<User>(res);     // parse + validate; on failure writes 400 JSON, returns nullopt
-    if (!u) return;                   // one-liner happy path
-    // ... use *u ...
-    res.status(201).json(*u);
+app.post("/signup", [](Request& req, Response& res) {
+    auto s = req.bind<Signup>(res);   // parse + validate; on failure writes 400 JSON, returns nullopt
+    if (!s) return;                   // one-liner happy path
+    // ... use *s ...
+    res.status(201).json(*s);
 });
-// or, for custom handling:  auto v = req.validate<User>();  // -> { bool ok; User value; vector<FieldError> errors }
+// or, for custom handling:  auto v = req.validate<Signup>();  // -> { bool ok; Signup value; vector<FieldError> errors }
 ```
 
 Constraints (a wrong-type use is a clear **compile error**, e.g. `len` on a numeric field):
@@ -189,12 +191,46 @@ I/O-bound connections (see the [work-stealing valve](#work-stealing-valve)):
 
 ```cpp
 app.get("/work", [](Request&, Response& res) -> vthread {
-    std::uint64_t acc = 0;
-    co_await swiftnet::offload([&]{ /* heavy compute */ });
-    Json j; j["acc"] = acc; res.json(j);
+    std::uint64_t sum = 0;
+    co_await swiftnet::offload([&sum]{                  // runs on a stealable compute task
+        for (std::uint64_t i = 0; i < 1'000'000; ++i) sum += i;
+    });
+    Json j; j["sum"] = sum;                             // sum was produced by the offloaded work
+    res.json(j);
     co_return;
 });
 ```
+
+---
+
+## Request lifecycle
+
+A request never leaves the core that accepted it — the whole path below runs on one pinned engine
+thread, lock-free. Only the **route handler** is yours to write; everything else is the framework.
+
+```mermaid
+flowchart TD
+    C([Client]) -->|TCP connect| K{{Kernel · SO_REUSEPORT}}
+    K -->|accept routed to one core| E[Per-core engine — pinned thread<br/>owns this connection]
+    E --> P[Parse HTTP request<br/>SIMD byte scan]
+    P --> AM[Async middleware<br/>runs before routing]
+    AM --> R{Radix router match?}
+    R -->|no| NF[404 Not Found]
+    R -->|yes| GM[Global middleware chain<br/>next / short-circuit]
+    GM -->|a middleware skips next| SC[Short-circuit<br/>e.g. 401 · CORS preflight]
+    GM -->|falls through| RH[Route handler<br/>+ any scoped plugin middleware<br/>composed in at registration]
+    RH --> VB{req.validate / bind?<br/>opt-in}
+    VB -->|invalid| E4[400 validation_failed]
+    VB -->|valid or not used| HB[Handler body]
+    NF --> W[Serialize + async_write<br/>on the engine's reactor]
+    SC --> W
+    E4 --> W
+    HB --> W
+    W -->|response| C
+```
+
+Scoped plugin middleware is **composed into the handler at registration**, so it costs nothing extra
+at request time, and `req.validate` / `req.bind` run only if your handler calls them.
 
 ---
 
@@ -214,6 +250,35 @@ no toggle for one.
 - **I/O coroutines are never stolen.** Only explicit compute tasks (`offload`) are stealable — moving a
   pinned I/O coroutine would arm the wrong engine's reactor.
 
+```mermaid
+flowchart TB
+    NET([Incoming connections]) --> K{{Kernel · SO_REUSEPORT<br/>one listener per engine}}
+    K --> E0
+    K --> E1
+    K --> EN[Engine · core N ...]
+    subgraph E0 [Engine · core 0 — pinned thread]
+        direction TB
+        L0[Event loop · reactor backend]
+        RQ0[Run queue · pinned I/O coroutines]
+        CQ0[Compute queue · offload tasks]
+        IN0[MPSC inbox · cross-thread schedule]
+    end
+    subgraph E1 [Engine · core 1 — pinned thread]
+        direction TB
+        L1[Event loop]
+        RQ1[Run queue]
+        CQ1[Compute queue]
+        IN1[MPSC inbox]
+    end
+    CQ1 -. valve steals a compute task .-> CQ0
+    CQ0 -. resume returns to owner engine .-> RQ1
+```
+
+Every engine is identical and shares nothing on the request path. Connections — and their I/O
+coroutines — are pinned to the engine that accepted them. The **work-stealing valve** is OFF by
+default; when on, an idle engine may take a *compute* task (from `offload`) off a busy one — never a
+pinned I/O coroutine — and the original connection still resumes on its owner engine.
+
 Routing uses a compiled **radix tree** (static / `:param` / `*`), not per-request regex.
 
 ---
@@ -231,11 +296,13 @@ option.
 | Linux, io_uring probe fails (old kernel / seccomp / container) | **epoll** | NEON / AVX2·SSE2 | yes (if permitted) |
 | macOS (Apple Silicon / Intel) | **kqueue** | NEON / AVX2·SSE2 | **no** — `KERN_NOT_SUPPORTED` (never faked) |
 | Windows | **IOCP** | AVX2·SSE2 | yes |
-| anything inconclusive | **epoll / scalar** | scalar | no |
+| anything inconclusive | **epoll** | scalar | no |
 
 The io_uring choice comes from an **actual `io_uring_queue_init` probe**, not a version guess, so a
-container whose seccomp policy blocks io_uring transparently falls back to epoll. The selected backend
-is logged at startup with a `VERIFIED`/`UNVERIFIED` tag, e.g.:
+container whose seccomp policy blocks io_uring transparently falls back to epoll. (The probe is
+compiled in only when liburing is found at build time; without it, io_uring reports unavailable and
+epoll is selected. On x86, AVX2 is preferred over SSE2; on ARM, NEON is the baseline.) The selected
+backend is logged at startup with a `VERIFIED`/`UNVERIFIED` tag, e.g.:
 
 ```
 SwiftNet runtime: os=macOS (25.5.0) arch=arm64 cores=10 logical/10 physical
@@ -250,21 +317,23 @@ SwiftNet config: engines=10 port=8080 backlog=1024
 
 ## Configuration
 
-Precedence: **built-in defaults → programmatic (code) → YAML file → environment variables.**
-**Environment always wins.** YAML is optional (path from `SWIFTNET_CONFIG`, else `./swiftnet.yaml`);
-a missing file is skipped and a malformed one is logged and ignored (never crashes).
+Precedence, lowest to highest: **built-in defaults → programmatic (code) → YAML file → environment
+variables** — **environment always wins.** The *programmatic* layer covers only the three values you
+set in code (port, engines, backlog; see below); every other knob comes from defaults, YAML, or env.
+YAML is optional (path from `SWIFTNET_CONFIG`, else `./swiftnet.yaml`); a missing file is skipped and a
+malformed one is logged and ignored (never crashes).
 
 | Knob | Env var | YAML key | Default | Range | Platform |
 |---|---|---|---|---|---|
 | Engine count | `SWIFTNET_ENGINES` | `engines` | all logical cores | 1..logical | all |
 | Listen port | `SWIFTNET_PORT` | `port` | 8080 | 1..65535 | all |
-| Accept backlog | `SWIFTNET_BACKLOG` | `backlog` | 1024 | ≥1 | all |
+| Accept backlog | `SWIFTNET_BACKLOG` | `backlog` | 1024 | 1..1048576 | all |
 | Work-steal valve | `SWIFTNET_STEAL` | `steal` | off | 0/1 | all |
-| Steal threshold (victim depth) | `SWIFTNET_STEAL_THRESHOLD` | `steal_threshold` | 1 | ≥0 | all |
-| Steal max batch / turn | `SWIFTNET_STEAL_MAX_BATCH` | `steal_max_batch` | 1 | ≥1 | all |
+| Steal threshold (victim depth) | `SWIFTNET_STEAL_THRESHOLD` | `steal_threshold` | 1 | 0..1048576 | all |
+| Steal max batch / turn | `SWIFTNET_STEAL_MAX_BATCH` | `steal_max_batch` | 1 | 1..65536 | all |
 | Min idle engines before stealing | `SWIFTNET_STEAL_MIN_IDLE` | `steal_min_idle` | 0 | 0..engines | all |
-| Max request header bytes | `SWIFTNET_MAX_HEADER_BYTES` | `max_header_bytes` | 65536 | 1KiB..1MiB | all |
-| Max request body bytes | `SWIFTNET_MAX_BODY_BYTES` | `max_body_bytes` | 8 MiB | 0..2GiB | all |
+| Max request header bytes | `SWIFTNET_MAX_HEADER_BYTES` | `max_header_bytes` | 65536 (64 KiB) | 1024..1048576 (1 KiB–1 MiB) | all |
+| Max request body bytes | `SWIFTNET_MAX_BODY_BYTES` | `max_body_bytes` | 8388608 (8 MiB) | 0..2147483648 (0–2 GiB) | all |
 | Log level | `SWIFTNET_LOG_LEVEL` | `log_level` | info | trace/debug/info/warn/error | all |
 | io_uring provided buffers | `SWIFTNET_IOURING_PROVIDED_BUFFERS` | `iouring_provided_buffers` | off | 0/1 | Linux (reserved, UNVERIFIED) |
 | I/O backend · SIMD · pinning | — | — | **auto-detected** | — | embedded (logged, not overridable) |
@@ -281,7 +350,8 @@ max_body_bytes: 1048576
 log_level: info
 ```
 
-Programmatic seeds (overridden by YAML/env): `SwiftNet app(port); app.set_threads(n); app.set_backlog(b);`
+Programmatic seeds — port, engines, backlog — overridden by YAML/env:
+`SwiftNet app(port); app.set_threads(n); app.set_backlog(b);`
 
 ---
 
@@ -304,7 +374,7 @@ offload; it cannot help work that runs inline in a pinned coroutine).
 | Platform / backend | Status | What's verified |
 |---|---|---|
 | **macOS / kqueue** (Apple Silicon) | ✅ **Measured** | All BENCHMARKS.md numbers; ctest; ThreadSanitizer-clean under load |
-| **Linux / io_uring** | ⚙️ Functional, **throughput UNVERIFIED** | Compiles + full test suite + live requests in a Linux container; per-engine timers + eventfd wake + `COOP_TASKRUN`. Multishot accept / provided buffers are documented future work |
+| **Linux / io_uring** | ⚙️ Functional, **throughput UNVERIFIED** | Compiles + full test suite + live requests in a Linux container; per-engine timers + eventfd wake + `COOP_TASKRUN` (intentionally not `SINGLE_ISSUER`/`DEFER_TASKRUN` — the ring is created off the engine thread, so those flags would abort). Multishot accept / provided buffers are documented future work |
 | **Linux / epoll** | ⚙️ Functional, **throughput UNVERIFIED** | Auto-selected when io_uring is unavailable; compiles + test suite + live requests in a container |
 | **Windows / IOCP** | 🚧 **Skeleton, UNVERIFIED** | Compiles as a shape behind the backend interface; a real `OVERLAPPED` + `WSARecv/WSASend` completion path (and the Windows `tcp_socket` integration) is **not yet done** — the authors have no Windows toolchain to compile or run it |
 
@@ -318,7 +388,7 @@ No throughput/latency number is reported for any backend except kqueue. See
 ```bash
 # Release (default)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-ctest --test-dir build --output-on-failure          # unit, detect, config, simd, glaze, integration
+ctest --test-dir build --output-on-failure          # unit, detect, config, simd, glaze, validate, plugin, integration
 
 # Sanitizers (gate the concurrency-critical paths)
 cmake -S . -B build-tsan -DSWIFTNET_SANITIZE=thread  && cmake --build build-tsan -j
