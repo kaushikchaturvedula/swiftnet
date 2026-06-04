@@ -1,6 +1,8 @@
 # SwiftNet
 
-**Build fast HTTP APIs in modern C++.** SwiftNet is a C++23 coroutine web framework with an
+> ### ⚡ Build fast HTTP APIs in modern C++.
+
+SwiftNet is a C++23 coroutine web framework with an
 Express/Fastify-style API, built on a **per-core, shared-nothing, lock-free** runtime. Each CPU core runs one engine that owns its own
 connections, run queue, and I/O reactor — no global queues, no shared mutable state on the request
 hot path. The best I/O backend, SIMD path, and core-pinning for the machine are **auto-detected and
