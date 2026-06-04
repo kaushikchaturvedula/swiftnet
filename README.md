@@ -263,7 +263,8 @@ flowchart TB
         L0[Event loop · reactor backend]
         RQ0[Run queue · pinned I/O coroutines]
         CQ0[Compute queue · offload tasks]
-        IN0[MPSC inbox · cross-thread schedule]
+        IN0[MPSC inbox · new roots via schedule]
+        RS0[MPSC resume_q · stolen-task hand-back]
     end
     subgraph E1 [Engine · core 1 — pinned thread]
         direction TB
@@ -271,9 +272,10 @@ flowchart TB
         RQ1[Run queue]
         CQ1[Compute queue]
         IN1[MPSC inbox]
+        RS1[MPSC resume_q]
     end
-    CQ1 -. valve steals a compute task .-> CQ0
-    CQ0 -. resume returns to owner engine .-> RQ1
+    CQ1 -. idle engine steals a compute task .-> CQ0
+    CQ0 -. resume handed back to owner via resume_q .-> RS1
 ```
 
 Every engine is identical and shares nothing on the request path. Connections — and their I/O

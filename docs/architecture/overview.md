@@ -19,7 +19,8 @@ flowchart TB
         L0[Event loop · reactor backend]
         RQ0[Run queue · pinned I/O coroutines]
         CQ0[Compute queue · offload tasks]
-        IN0[MPSC inbox · cross-thread schedule]
+        IN0[MPSC inbox · new roots via schedule]
+        RS0[MPSC resume_q · stolen-task hand-back]
     end
     subgraph E1 [Engine · core 1 — pinned thread]
         direction TB
@@ -27,9 +28,10 @@ flowchart TB
         RQ1[Run queue]
         CQ1[Compute queue]
         IN1[MPSC inbox]
+        RS1[MPSC resume_q]
     end
-    CQ1 -. valve steals a compute task .-> CQ0
-    CQ0 -. resume returns to owner engine .-> RQ1
+    CQ1 -. idle engine steals a compute task .-> CQ0
+    CQ0 -. resume handed back to owner via resume_q .-> RS1
 ```
 
 ## How it works
@@ -39,7 +41,7 @@ flowchart TB
 - **Kernel connection sharding via `SO_REUSEPORT`.** Every engine opens its *own* listener socket on the same port with `SO_REUSEPORT`. The kernel spreads incoming connections across those listeners, so there is no shared accept lock and no single thread funneling accepts.
 - **Connections are pinned to their accepting engine.** A connection's coroutine, its file descriptors, and its pending I/O all live on the engine that accepted it, and they always resume there. Because nothing about a connection is shared with another engine, the per-request path takes **no locks**.
 - **Cross-thread work goes through a lock-free MPSC inbox.** When another thread hands work to an engine (for example via `schedule()`), the work is pushed onto that engine's lock-free multi-producer/single-consumer inbox and drained by the owning engine on its next turn. The owner is the only consumer, so no lock is needed on the hot path.
-- **I/O coroutines are never stolen.** Only explicit `offload` compute tasks are stealable. Moving a pinned I/O coroutine to another engine would arm the wrong engine's reactor, so SwiftNet never does it — even when the optional [work-stealing valve](work-stealing-valve.md) is on, the stolen item is always a compute task, and the original connection still resumes on its owner engine.
+- **I/O coroutines are never stolen.** Only explicit `offload` compute tasks are stealable. Moving a pinned I/O coroutine to another engine would arm the wrong engine's reactor, so SwiftNet never does it — even when the optional [work-stealing valve](work-stealing-valve.md) is on, the stolen item is always a compute task. When a thief finishes a stolen task it hands the connection back through the owning engine's lock-free `resume_q` (then wakes it), so the connection always resumes where its I/O is pinned — a thief never writes another engine's run queue.
 
 ## What lives on each engine
 
@@ -49,7 +51,8 @@ flowchart TB
 | Listener socket | Its own `SO_REUSEPORT` listener on the configured port | No (kernel shards across them) |
 | Run queue | Pinned I/O coroutines for connections this engine accepted | No |
 | Compute queue | `offload` tasks; the only thing the valve may move between engines | Drained by owner; valve may steal |
-| MPSC inbox | Cross-thread `schedule()` injections, drained by the owner | Many producers, one consumer |
+| MPSC inbox | Cross-thread `schedule()` injections of new roots, drained by the owner | Many producers, one consumer |
+| MPSC resume_q | Connections handed back by a thief after a stolen compute task; drained and resumed by the owner | Many producers, one consumer |
 
 ## Why this design
 
