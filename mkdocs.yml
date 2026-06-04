@@ -1,0 +1,85 @@
+site_name: SwiftNet
+site_description: A C++23 coroutine web framework — per-core, shared-nothing, lock-free
+site_author: SwiftNet
+repo_name: kaushikchaturvedula/swiftnet
+repo_url: https://github.com/kaushikchaturvedula/swiftnet
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Your first server: getting-started/first-server.md
+  - Guides:
+      - Routing: guides/routing.md
+      - Requests & responses: guides/requests-and-responses.md
+      - Middleware: guides/middleware.md
+      - Typed JSON: guides/typed-json.md
+      - Validation: guides/validation.md
+      - Plugins & encapsulation: guides/plugins.md
+      - Async & CPU offload: guides/async-and-offload.md
+      - WebSockets: guides/websockets.md
+      - Static files: guides/static-files.md
+      - Configuration: guides/configuration.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Request lifecycle: architecture/request-lifecycle.md
+      - Auto-detection: architecture/auto-detection.md
+      - Work-stealing valve: architecture/work-stealing-valve.md
+  - Reference:
+      - Platform & backend support: reference/platform-support.md
+      - API cheat sheet: reference/api-cheatsheet.md
+  - Benchmarks: benchmarks.md
+  - FAQ & troubleshooting: faq.md

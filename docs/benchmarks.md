@@ -1,6 +1,6 @@
 # Benchmarks
 
-This page reports only what is genuinely measured. Every number here comes from one machine — an Apple M1 Pro running the `kqueue` backend — and the authoritative source, with raw `wrk`/`sample` output and reproduction scripts, is [`BENCHMARKS.md`](../BENCHMARKS.md) in the repository root. When in doubt, that file wins.
+This page reports only what is genuinely measured. Every number here comes from one machine — an Apple M1 Pro running the `kqueue` backend — and the authoritative source, with raw `wrk`/`sample` output and reproduction scripts, is [`BENCHMARKS.md`](https://github.com/kaushikchaturvedula/swiftnet/blob/main/BENCHMARKS.md) in the repository root. When in doubt, that file wins.
 
 > The single most important finding is methodological: on a single host, HTTP throughput over loopback is bound by the co-located load generator and the TCP loopback path, not by SwiftNet. At the measured ceiling the server sits about 92% idle. So single-host throughput measures the *harness*, not the server. The host-independent server metrics on this box are **per-request latency** and **CPU-per-request** — those are what this page reports.
 

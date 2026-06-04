@@ -32,7 +32,7 @@ You do not install these by hand. CMake first tries `find_package`, and only fal
 Clone the repository, then configure, build, and test:
 
 ```bash
-git clone https://github.com/<owner>/swiftnet.git
+git clone https://github.com/kaushikchaturvedula/swiftnet.git
 cd swiftnet
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -124,7 +124,7 @@ Let CMake pull SwiftNet at configure time:
 include(FetchContent)
 FetchContent_Declare(
     swiftnet
-    GIT_REPOSITORY https://github.com/<owner>/swiftnet.git
+    GIT_REPOSITORY https://github.com/kaushikchaturvedula/swiftnet.git
     GIT_TAG main
 )
 FetchContent_MakeAvailable(swiftnet)
